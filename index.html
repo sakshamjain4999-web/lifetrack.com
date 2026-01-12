@@ -67,14 +67,20 @@
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
+        // ---------------------------------------------------------
 
         const { useState, useEffect, createContext, useContext, useRef } = React;
+
+        // --- HELPER: Identify Virtual Items ---
+        const isVirtualItem = (item) => {
+            return typeof item.id === 'string' && item.id.startsWith('virtual_');
+        };
 
         // --- HELPER: CLEAN DATA ---
         const cleanData = (data) => {
             const cleaned = { ...data };
             delete cleaned.id;
-            delete cleaned.isVirtual;
+            delete cleaned.isVirtual; // Ensure this flag is never saved to DB
             return cleaned;
         };
 
@@ -107,6 +113,8 @@
         const GuestIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
         const ListIcon = (p) => <Icon {...p}><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></Icon>;
         const Logout = (p) => <Icon {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></Icon>;
+        // Added FolderIcon for visual distinction of nested items
+        const FolderIcon = (p) => <Icon {...p}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></Icon>;
 
         const getTodayString = () => new Date().toISOString().split('T')[0];
 
@@ -176,9 +184,11 @@
             }, [userId, collectionName]);
 
             const add = (item) => {
-                const itemWithTimestamp = cleanData({ ...item, createdAt: item.createdAt || new Date().toISOString() });
+                // IMPORTANT: SANITIZE DATA TO REMOVE 'isVirtual' AND EXISTING 'id'
+                const itemToSave = cleanData({ ...item, createdAt: item.createdAt || new Date().toISOString() });
+                
                 if (userId === 'guest') {
-                    const newItem = { id: Date.now().toString(), ...itemWithTimestamp };
+                    const newItem = { id: Date.now().toString(), ...itemToSave };
                     
                     const currentLS = localStorage.getItem(`lifetrack_${collectionName}`);
                     const currentData = currentLS ? JSON.parse(currentLS) : [];
@@ -190,7 +200,9 @@
                     window.dispatchEvent(new CustomEvent('lifetrack-update', { detail: { col: collectionName } }));
                     return Promise.resolve({ id: newItem.id });
                 }
-                return db.collection('users').doc(userId).collection(collectionName).add(itemWithTimestamp);
+                // Add catch for errors
+                return db.collection('users').doc(userId).collection(collectionName).add(itemToSave)
+                    .catch(err => { alert("Error adding data: " + err.message); throw err; });
             };
 
             const update = (id, updates) => {
@@ -205,7 +217,8 @@
                     window.dispatchEvent(new CustomEvent('lifetrack-update', { detail: { col: collectionName } }));
                     return Promise.resolve();
                 }
-                return db.collection('users').doc(userId).collection(collectionName).doc(id).update(updatesToSave);
+                return db.collection('users').doc(userId).collection(collectionName).doc(id).update(updatesToSave)
+                    .catch(err => { alert("Error updating data: " + err.message); throw err; });
             };
 
             const remove = (id) => {
@@ -219,7 +232,8 @@
                     window.dispatchEvent(new CustomEvent('lifetrack-update', { detail: { col: collectionName } }));
                     return Promise.resolve();
                 }
-                return db.collection('users').doc(userId).collection(collectionName).doc(id).delete();
+                return db.collection('users').doc(userId).collection(collectionName).doc(id).delete()
+                    .catch(err => { alert("Error deleting data: " + err.message); throw err; });
             };
             return { data, add, update, remove };
         }
@@ -388,6 +402,7 @@
             const [darkMode, setDarkMode] = useState(false);
             const [showSettings, setShowSettings] = useState(false);
             const [goals, setGoals] = useState({ calories: 2500, protein: 160, water: 4 });
+            const [geminiKey, setGeminiKey] = useState(localStorage.getItem('gemini_api_key') || '');
 
             useEffect(() => {
                 const unsubscribe = auth.onAuthStateChanged((u) => {
@@ -443,6 +458,11 @@
             };
 
             const loginAsGuest = () => { setUser({ uid: 'guest', photoURL: 'https://cdn-icons-png.flaticon.com/512/149/149071.png', displayName: 'Guest' }); };
+            
+            const handleSaveSettings = () => {
+                localStorage.setItem('gemini_api_key', geminiKey);
+                setShowSettings(false);
+            }
 
             if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-900 text-gray-500">Loading...</div>;
 
@@ -498,13 +518,15 @@
                         {showSettings && (
                             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                                 <div className="bg-white dark:bg-dark-800 w-full max-w-sm rounded-2xl shadow-2xl p-6 animate-slide-up">
-                                    <div className="flex justify-between items-center mb-6"><h3 className="text-lg font-bold text-gray-900 dark:text-white">Adjust Goals</h3><button onClick={() => setShowSettings(false)}><XIcon size={24} className="text-gray-400" /></button></div>
+                                    <div className="flex justify-between items-center mb-6"><h3 className="text-lg font-bold text-gray-900 dark:text-white">Adjust Goals & Settings</h3><button onClick={() => setShowSettings(false)}><XIcon size={24} className="text-gray-400" /></button></div>
                                     <div className="space-y-4">
                                         <div><label className="text-xs font-bold uppercase text-gray-500 mb-1 block">Daily Calories</label><input type="number" value={goals.calories} onChange={e => setGoals({...goals, calories: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" /></div>
                                         <div><label className="text-xs font-bold uppercase text-gray-500 mb-1 block">Daily Protein</label><input type="number" value={goals.protein} onChange={e => setGoals({...goals, protein: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" /></div>
                                         <div><label className="text-xs font-bold uppercase text-gray-500 mb-1 block">Daily Water</label><input type="number" value={goals.water} onChange={e => setGoals({...goals, water: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" /></div>
+                                        <hr className="border-gray-200 dark:border-gray-700 my-4" />
+                                        
                                         <button onClick={() => { auth.signOut(); setUser(null); setShowSettings(false); }} className="w-full py-3 text-red-500 font-medium text-sm mt-4 border border-red-100 dark:border-red-900 rounded-lg hover:bg-red-50">Sign Out</button>
-                                        <button onClick={() => setShowSettings(false)} className="w-full py-3 bg-primary-600 text-white rounded-lg font-bold shadow-lg hover:bg-primary-700">Save Goals</button>
+                                        <button onClick={handleSaveSettings} className="w-full py-3 bg-primary-600 text-white rounded-lg font-bold shadow-lg hover:bg-primary-700">Save Goals</button>
                                     </div>
                                 </div>
                             </div>
@@ -609,100 +631,53 @@
             );
         }
 
-        // --- SUBTASK PAGE (RECURSIVE) ---
+        // --- SUBTASK PAGE ---
         function TaskDetailsPage({ task, onClose, onUpdate }) {
             const [newSub, setNewSub] = useState('');
             const [noteText, setNoteText] = useState(task.note || '');
-            const [activeSubtaskForDetails, setActiveSubtaskForDetails] = useState(null);
-
             const handleNoteChange = (e) => { setNoteText(e.target.value); onUpdate(task.id, { ...task, note: e.target.value }); };
             const handleAddSub = (e) => { e.preventDefault(); if(!newSub.trim()) return; const updated = [...(task.subtasks || []), { id: Date.now(), text: newSub, completed: false }]; onUpdate(task.id, { ...task, subtasks: updated }); setNewSub(''); };
             const toggleSub = (subId) => { const updated = task.subtasks.map(s => s.id === subId ? { ...s, completed: !s.completed } : s); onUpdate(task.id, { ...task, subtasks: updated }); };
             const deleteSub = (subId) => { const updated = task.subtasks.filter(s => s.id !== subId); onUpdate(task.id, { ...task, subtasks: updated }); };
-            
-            // This is the RECURSIVE UPDATE logic
-            const handleSubtaskUpdate = (subId, updatedData) => {
-                const updatedSubtasks = task.subtasks.map(s => s.id === subId ? updatedData : s);
-                onUpdate(task.id, { ...task, subtasks: updatedSubtasks });
-                // Keep local modal state in sync so it doesn't close/glitch
-                if (activeSubtaskForDetails && activeSubtaskForDetails.id === subId) {
-                    setActiveSubtaskForDetails(updatedData);
-                }
-            };
-
             const total = task.subtasks ? task.subtasks.length : 0;
             const completed = task.subtasks ? task.subtasks.filter(s => s.completed).length : 0;
 
             return (
-                <div className="fixed inset-0 bg-white dark:bg-dark-900 z-50 flex flex-col animate-slide-in">
+                <div className="fixed inset-0 bg-white dark:bg-dark-900 z-50 flex flex-col animate-slide-up">
                     <div className="bg-primary-600 p-4 text-white shadow-md flex items-center gap-3">
                         <button onClick={onClose} className="p-1 hover:bg-primary-700 rounded"><ArrowLeft size={24} /></button>
                         <div className="flex-1">
-                            <h3 className="font-bold text-lg leading-tight truncate">{task.text}</h3>
+                            <h3 className="font-bold text-lg leading-tight">{task.text}</h3>
+                            <p className="text-xs text-primary-200 mt-0.5">Details & Notes</p>
                         </div>
                     </div>
-                    
                     <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                        {/* CHECKLIST SECTION */}
                         <div>
                             <div className="flex justify-between items-center mb-2">
                                 <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Checklist</h4>
                                 <span className="text-xs font-medium bg-gray-100 dark:bg-dark-800 px-2 py-1 rounded text-gray-600 dark:text-gray-300">{completed}/{total} Done</span>
                             </div>
-                            
                             <form onSubmit={handleAddSub} className="flex gap-2 mb-3">
-                                <input type="text" value={newSub} onChange={e => setNewSub(e.target.value)} placeholder="Add subtask..." className="flex-1 p-3 bg-gray-50 dark:bg-dark-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white transition-all" />
+                                <input type="text" value={newSub} onChange={e => setNewSub(e.target.value)} placeholder="Add item..." className="flex-1 p-3 bg-gray-50 dark:bg-dark-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white transition-all" />
                                 <button className="bg-primary-600 text-white px-4 rounded-xl hover:bg-primary-700 font-bold text-xl flex items-center justify-center"><Plus size={24} /></button>
                             </form>
-
                             <div className="space-y-2">
-                                {(!task.subtasks || task.subtasks.length === 0) && <p className="text-gray-400 text-sm text-center py-4">No subtasks yet.</p>}
-                                {task.subtasks?.map(sub => {
-                                    // Calculate nested counts for the badge
-                                    const nestedCount = sub.subtasks ? sub.subtasks.length : 0;
-                                    const nestedCompleted = sub.subtasks ? sub.subtasks.filter(s => s.completed).length : 0;
-                                    
-                                    return (
-                                        <div key={sub.id} className="flex items-center justify-between p-3 bg-white dark:bg-dark-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm transition-all hover-card">
-                                            <div className="flex items-center gap-3 overflow-hidden flex-1">
-                                                <button onClick={() => toggleSub(sub.id)} className={`flex-shrink-0 text-xl transition-colors ${sub.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{sub.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
-                                                
-                                                <div className="flex flex-col">
-                                                    <span className={`text-base font-medium truncate ${sub.completed ? 'line-through text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-200'}`}>{sub.text}</span>
-                                                    {/* NESTED COUNT BADGE */}
-                                                    {nestedCount > 0 && (
-                                                        <span className="text-[10px] bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 px-1.5 py-0.5 rounded-md flex items-center gap-1 w-fit mt-1">
-                                                            <FileText size={10} /> {nestedCompleted}/{nestedCount}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                {/* RECURSIVE OPEN BUTTON */}
-                                                <button onClick={() => setActiveSubtaskForDetails(sub)} className="p-1.5 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-300"><FileText size={16} /></button>
-                                                <button onClick={() => deleteSub(sub.id)} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={16} /></button>
-                                            </div>
+                                {task.subtasks?.map(sub => (
+                                    <div key={sub.id} className="flex items-center justify-between p-3 bg-white dark:bg-dark-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm transition-all hover-card">
+                                        <div className="flex items-center gap-3 overflow-hidden">
+                                            <button onClick={() => toggleSub(sub.id)} className={`flex-shrink-0 text-xl transition-colors ${sub.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{sub.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
+                                            <span className={`text-base font-medium truncate ${sub.completed ? 'line-through text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-200'}`}>{sub.text}</span>
                                         </div>
-                                    );
-                                })}
+                                        <button onClick={() => deleteSub(sub.id)} className="text-gray-300 hover:text-red-500 p-2"><Trash2 size={18} /></button>
+                                    </div>
+                                ))}
                             </div>
                         </div>
-
-                        {/* NOTES SECTION */}
                         <div>
                             <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Notes</h4>
-                            <textarea value={noteText} onChange={handleNoteChange} placeholder="Type notes here..." className="w-full h-40 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400 text-gray-700 dark:text-yellow-100 resize-none leading-relaxed"></textarea>
+                            <textarea value={noteText} onChange={handleNoteChange} placeholder="Type extra details here..." className="w-full h-40 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400 text-gray-700 dark:text-yellow-100 resize-none leading-relaxed"></textarea>
                         </div>
                     </div>
-
-                    {/* RECURSIVE RENDER: The component calls itself! */}
-                    {activeSubtaskForDetails && (
-                        <TaskDetailsPage 
-                            task={activeSubtaskForDetails} 
-                            onClose={() => setActiveSubtaskForDetails(null)} 
-                            onUpdate={handleSubtaskUpdate} 
-                        />
-                    )}
                 </div>
             );
         }
@@ -716,10 +691,8 @@
             const [localTasks, setLocalTasks] = useState([]);
             const [newTask, setNewTask] = useState('');
             const [activeTaskForDetails, setActiveTaskForDetails] = useState(null);
+            // RE-ADDED CATEGORY STATE
             const [category, setCategory] = useState('General');
-            const [showFrequencyModal, setShowFrequencyModal] = useState(false);
-            const [pendingTaskForFrequency, setPendingTaskForFrequency] = useState(null);
-            const [showBulkAdd, setShowBulkAdd] = useState(false);
 
             useEffect(() => {
                 const manualTasks = tasks.filter(t => t.date === selectedDate);
@@ -742,10 +715,12 @@
                     }
                 });
 
+                // --- SORTING LOGIC: Newest on Top (Descending createdAt) ---
                 const combined = [...manualTasks, ...generatedTasks];
                 combined.sort((a, b) => {
                     const dateA = a.createdAt || ''; 
                     const dateB = b.createdAt || '';
+                    // Descending sort: B - A
                     if (dateB < dateA) return -1;
                     if (dateB > dateA) return 1;
                     return 0;
@@ -768,10 +743,11 @@
                 setNewTask(''); 
                 showToast('Task Added'); 
             };
-            const handleToggleTask = (task) => { if (task.isVirtual) { addTaskToDb({ text: task.text, category: task.category, date: selectedDate, ruleId: task.ruleId, subtasks: [], note: "", completed: !task.completed }); } else { updateTaskInDb(task.id, { completed: !task.completed }); } };
+            const handleToggleTask = (task) => { if (isVirtualItem(task)) { addTaskToDb({ text: task.text, category: task.category, date: selectedDate, ruleId: task.ruleId, subtasks: [], note: "", completed: !task.completed }); } else { updateTaskInDb(task.id, { completed: !task.completed }); } };
             
             const handleDeleteTask = (task) => { 
-                if (task.isVirtual) { 
+                // FORCE DELETE CHECK: ID starts with virtual_ ?
+                if (isVirtualItem(task)) { 
                     addDeletedInstance({ ruleId: task.ruleId, date: selectedDate }).then((ref) => {
                         showToast('Task Deleted', 'default', {
                             label: 'UNDO',
@@ -780,7 +756,9 @@
                     });
                 } else { 
                     const taskData = { ...task };
-                    delete taskData.id;
+                    // Clean data before potential restore
+                    const cleanTaskData = cleanData(taskData);
+                    
                     removeTaskFromDb(task.id);
                     
                     if (task.ruleId) { 
@@ -795,7 +773,7 @@
                     } else {
                         showToast('Task Deleted', 'default', {
                             label: 'UNDO',
-                            onClick: () => addTaskToDb(taskData)
+                            onClick: () => addTaskToDb(cleanTaskData)
                         });
                     }
                 } 
@@ -803,53 +781,30 @@
             
             const handleUpdateDetails = (taskId, updatedData) => { 
                 const task = localTasks.find(t => t.id === taskId);
-                if (task.isVirtual) { addTaskToDb({ text: task.text, category: task.category, date: selectedDate, ruleId: task.ruleId, subtasks: updatedData.subtasks, note: updatedData.note, completed: task.completed }); setActiveTaskForDetails(null); }
+                if (isVirtualItem(task)) { addTaskToDb({ text: task.text, category: task.category, date: selectedDate, ruleId: task.ruleId, subtasks: updatedData.subtasks, note: updatedData.note, completed: task.completed }); setActiveTaskForDetails(null); }
                 else { updateTaskInDb(taskId, { subtasks: updatedData.subtasks, note: updatedData.note }); if (activeTaskForDetails && activeTaskForDetails.id === taskId) setActiveTaskForDetails(updatedData); }
             };
-
-            const initiateToggleDaily = (task) => {
+            const handleToggleDaily = (task) => {
                 const rule = dailyRules.find(r => r.id === task.ruleId);
                 const isRepeating = rule && (rule.endDate === null || rule.endDate > selectedDate);
-                
+
                 if (isRepeating) {
-                    if(rule) updateRule(rule.id, { endDate: selectedDate });
+                    if (rule) updateRule(rule.id, { endDate: selectedDate });
                     showToast('Recurring Disabled');
                 } else {
-                    setPendingTaskForFrequency(task);
-                    setShowFrequencyModal(true);
+                    if (rule) {
+                        updateRule(rule.id, { endDate: null });
+                    } else {
+                        addRule({ text: task.text, category: task.category, startDate: selectedDate, endDate: null })
+                            .then(docRef => updateTaskInDb(task.id, { ruleId: docRef.id }));
+                    }
+                    showToast('Recurring Enabled');
                 }
             };
+            const changeDate = (days) => { const date = new Date(selectedDate); date.setDate(date.getDate() + days); setSelectedDate(date.toISOString().split('T')[0]); };
+            const isToday = selectedDate === new Date().toISOString().split('T')[0];
+            const displayDate = new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
 
-            const confirmToggleDaily = (days) => {
-                const task = pendingTaskForFrequency;
-                const rule = dailyRules.find(r => r.id === task.ruleId);
-                if (rule) {
-                    updateRule(rule.id, { endDate: null, days: days });
-                } else {
-                    addRule({ text: task.text, category: task.category, startDate: selectedDate, endDate: null, days: days })
-                        .then(docRef => updateTaskInDb(task.id, { ruleId: docRef.id }));
-                }
-                setShowFrequencyModal(false);
-                setPendingTaskForFrequency(null);
-                showToast('Recurring Enabled');
-            };
-
-            const handleBulkAdd = (tasks) => {
-                tasks.forEach(t => {
-                    setTimeout(() => {
-                        addTaskToDb({
-                            text: t.text,
-                            category: t.category,
-                            completed: false,
-                            date: t.date,
-                            subtasks: [],
-                            note: ""
-                        });
-                    }, 50);
-                });
-                showToast(`${tasks.length} Tasks Added!`);
-            };
-            
             const getCategoryColor = (cat) => {
                 switch(cat) {
                     case 'Work': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300';
@@ -860,14 +815,20 @@
             };
 
             return (
-                <div className="space-y-6 animate-slide-in">
+                <div className="space-y-6">
+                    <div className="flex items-center justify-between bg-white dark:bg-dark-800 p-3 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+                        <button onClick={() => changeDate(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-300"><ChevronLeft size={20} /></button>
+                        <div className="relative flex flex-col items-center">
+                            <span className="text-sm font-bold text-gray-800 dark:text-white">{isToday ? "Today" : displayDate}</span>
+                            <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-20" />
+                        </div>
+                        <button onClick={() => changeDate(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-300"><ChevronRight size={20} /></button>
+                    </div>
+
                     <form onSubmit={handleAddTask} className="flex flex-col gap-3">
                         <input type="text" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a new task..." className="w-full p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 dark:text-white shadow-sm focus:ring-2 focus:ring-primary-500 outline-none" />
                         
                         <div className="flex gap-2">
-                            <button type="button" onClick={() => setShowBulkAdd(true)} className="p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition">
-                                <ListIcon size={24} />
-                            </button>
                             <select 
                                 value={category} 
                                 onChange={(e) => setCategory(e.target.value)}
@@ -901,12 +862,9 @@
                                             <span className={`font-medium truncate ${task.completed ? 'line-through text-gray-400' : 'text-gray-800 dark:text-white'}`}>{task.text}{isRepeating && <Repeat size={12} className="inline ml-1 text-primary-400" />}</span>
                                             
                                             <div className="flex items-center gap-2 mt-1">
-                                                {/* Category Badge */}
                                                 <span className={`text-[10px] px-2 py-0.5 rounded-full w-fit ${getCategoryColor(task.category)}`}>
                                                     {task.category}
                                                 </span>
-
-                                                {/* Subtask Count Badge (File ke upar show hone wala feature) */}
                                                 {subtaskCount > 0 && (
                                                     <span className="text-[10px] px-2 py-0.5 rounded-full w-fit bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 flex items-center gap-1">
                                                         <FileText size={10} /> {completedSubtasks}/{subtaskCount}
@@ -917,7 +875,9 @@
                                     </div>
                                     <div className="flex items-center gap-3 ml-2">
                                         <button onClick={() => setActiveTaskForDetails(task)} className="p-1.5 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-300"><FileText size={18} /></button>
-                                        <button onClick={() => initiateToggleDaily(task)} className={`w-8 h-5 rounded-full relative transition-colors ${isRepeating ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'}`}><span className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full transition-transform ${isRepeating ? 'translate-x-3' : ''}`} /></button>
+                                        <button onClick={() => handleToggleDaily(task)} className={`w-8 h-5 rounded-full relative transition-colors ${isRepeating ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'}`}>
+                                            <span className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full transition-transform ${isRepeating ? 'translate-x-3' : ''}`} />
+                                        </button>
                                         <button onClick={() => handleDeleteTask(task)} className="text-gray-300 hover:text-red-500"><Trash2 size={18} /></button>
                                     </div>
                                 </div>
@@ -925,8 +885,6 @@
                         })}
                     </div>
                     {activeTaskForDetails && <TaskDetailsPage task={activeTaskForDetails} onClose={() => setActiveTaskForDetails(null)} onUpdate={handleUpdateDetails} />}
-                    {showFrequencyModal && <FrequencyModal onClose={() => { setShowFrequencyModal(false); setPendingTaskForFrequency(null); }} onSave={confirmToggleDaily} initialDays={pendingTaskForFrequency?.ruleId ? dailyRules.find(r => r.id === pendingTaskForFrequency.ruleId)?.days : undefined} />}
-                    {showBulkAdd && <BulkAddModal onClose={() => setShowBulkAdd(false)} onAdd={handleBulkAdd} selectedDate={selectedDate} />}
                 </div>
             );
         }
@@ -937,9 +895,26 @@
             const [entry, setEntry] = useState({ exercise: '', sets: '', reps: '', weight: '' });
             const { showToast } = useContext(ToastContext);
 
-            const addSet = (e) => { e.preventDefault(); if (!entry.exercise) return; addWorkout({ ...entry, date: selectedDate }); setEntry({ ...entry, sets: '', reps: '', weight: '' }); showToast('Set Logged'); };
-            const handleDeleteWorkout = (id) => { const workoutToRestore = workouts.find(w => w.id === id); const { id: _, ...data } = workoutToRestore; deleteWorkout(id); showToast('Workout Deleted', 'default', { label: 'UNDO', onClick: () => addWorkout(data) }); };
-            
+            const addSet = (e) => {
+                e.preventDefault(); if (!entry.exercise) return;
+                addWorkout({ ...entry, date: selectedDate });
+                setEntry({ ...entry, sets: '', reps: '', weight: '' });
+                showToast('Set Logged');
+            };
+
+            const handleDeleteWorkout = (id) => {
+                 const workoutToRestore = workouts.find(w => w.id === id);
+                 const { id: _, ...data } = workoutToRestore; 
+                 // Clean before restoring
+                 const cleanWorkoutData = cleanData(data);
+                 
+                 deleteWorkout(id);
+                 showToast('Workout Deleted', 'default', {
+                    label: 'UNDO',
+                    onClick: () => addWorkout(cleanWorkoutData)
+                 });
+            };
+
             const todaysWorkouts = workouts.filter(w => w.date === selectedDate);
             todaysWorkouts.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
@@ -969,6 +944,27 @@
                 </div>
             );
         }
+
+        // --- CIRCLE PROGRESS COMPONENT (Renamed to avoid conflict) ---
+        const WaterProgressCircle = ({ value, max, color, size = 100 }) => {
+            const radius = (size - 10) / 2;
+            const circumference = 2 * Math.PI * radius;
+            const percentage = Math.min(value / max, 1);
+            const offset = circumference - percentage * circumference;
+
+            return (
+                <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+                    <svg width={size} height={size} className="transform -rotate-90">
+                        <circle cx={size/2} cy={size/2} r={radius} stroke="#f3f4f6" strokeWidth="8" fill="transparent" className="dark:stroke-gray-700" />
+                        <circle cx={size/2} cy={size/2} r={radius} stroke={color} strokeWidth="8" fill="transparent" strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-1000 ease-out" />
+                    </svg>
+                    <div className="absolute flex flex-col items-center">
+                        <span className="text-xl font-bold text-gray-700 dark:text-white">{value}L</span>
+                        <span className="text-[10px] text-gray-400">/ {max}L</span>
+                    </div>
+                </div>
+            );
+        };
 
         // --- DIET SECTION (With Goals & New Icons & Sort) ---
         function DietSection({ userId, selectedDate, goals }) {
@@ -1020,10 +1016,10 @@
             const currentWater = todayWaterLog ? todayWaterLog.amount : 0;
             const updateWater = (amount) => { if (todayWaterLog) { updateWaterLog(todayWaterLog.id, { amount }); } else { addWaterLog({ date: selectedDate, amount }); } };
             const handleAddMeal = (e) => { e.preventDefault(); if (!newMeal.name) return; addMealDb({ ...newMeal, date: selectedDate, completed: false }); setNewMeal({ name: '', calories: '', protein: '' }); showToast('Meal Added'); };
-            const handleToggleMeal = (meal) => { if (meal.isVirtual) { addMealDb({ ...meal, isVirtual: false, completed: !meal.completed }); } else { updateMealDb(meal.id, { completed: !meal.completed }); } };
+            const handleToggleMeal = (meal) => { if (isVirtualItem(meal)) { addMealDb({ ...meal, isVirtual: false, completed: !meal.completed }); } else { updateMealDb(meal.id, { completed: !meal.completed }); } };
             
             const handleDeleteMeal = (meal) => { 
-                if (meal.isVirtual) { 
+                if (isVirtualItem(meal)) { 
                     addDeletedDiet({ ruleId: meal.ruleId, date: selectedDate }).then((ref) => {
                         showToast('Meal Deleted', 'default', {
                             label: 'UNDO',
@@ -1032,7 +1028,9 @@
                     });
                 } else { 
                     const mealData = { ...meal };
-                    delete mealData.id;
+                    // Clean before potential restore
+                    const cleanMealData = cleanData(mealData);
+
                     removeMealDb(meal.id);
                     
                     if (meal.ruleId) {
@@ -1047,7 +1045,7 @@
                     } else {
                          showToast('Meal Deleted', 'default', {
                             label: 'UNDO',
-                            onClick: () => addMealDb(mealData)
+                            onClick: () => addMealDb(cleanMealData)
                         });
                     }
                 } 
@@ -1113,9 +1111,7 @@
 
                     <div className="bg-white dark:bg-dark-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
                         <form onSubmit={handleAddMeal} className="flex flex-col gap-3">
-                            <div className="flex gap-2">
-                                <input type="text" placeholder="Add Meal (e.g. Oats)" className="flex-1 p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" value={newMeal.name} onChange={e => setNewMeal({...newMeal, name: e.target.value})} />
-                            </div>
+                            <input type="text" placeholder="Add Meal (e.g. Oats)" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" value={newMeal.name} onChange={e => setNewMeal({...newMeal, name: e.target.value})} />
                             <div className="flex gap-2">
                                 <input type="number" placeholder="Cals" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={newMeal.calories} onChange={e => setNewMeal({...newMeal, calories: e.target.value})} />
                                 <input type="number" placeholder="Prot" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={newMeal.protein} onChange={e => setNewMeal({...newMeal, protein: e.target.value})} />
