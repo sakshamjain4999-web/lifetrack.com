@@ -327,6 +327,8 @@
             const { data: diet } = useFirestore(userId, 'diet');
             const { data: todos } = useFirestore(userId, 'todos');
             const { data: water } = useFirestore(userId, 'water');
+            const { data: gym } = useFirestore(userId, 'gym');
+            
             const todaysMeals = diet.filter(m => m.date === selectedDate && m.completed);
             const calCurrent = todaysMeals.reduce((acc, curr) => acc + Number(curr.calories), 0);
             const waterLog = water.find(w => w.date === selectedDate);
@@ -334,8 +336,12 @@
             const todaysTasks = todos.filter(t => t.date === selectedDate);
             const tasksDone = todaysTasks.filter(t => t.completed).length;
             const tasksTotal = todaysTasks.length;
+            const gymDone = gym.some(w => w.date === selectedDate);
             const calPct = goals.calories ? Math.round((calCurrent/goals.calories)*100) : 0;
             const taskPct = tasksTotal ? Math.round((tasksDone/tasksTotal)*100) : 0;
+
+            // Updated Code to include Protein Progress Bar
+            const protCurrent = todaysMeals.reduce((acc, curr) => acc + Number(curr.protein), 0);
 
             return (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-fade-in">
@@ -348,8 +354,30 @@
                         </div>
                     </div>
                     <div className="bg-white dark:bg-dark-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm"><div className="flex items-center gap-2 text-blue-500 mb-4 font-bold text-sm"><CheckSquare size={20} /> Tasks</div><div className="text-3xl font-bold text-gray-900 dark:text-white">{tasksDone} <span className="text-gray-400 text-lg">/ {tasksTotal}</span></div><div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full mt-4"><div className="bg-blue-500 h-full rounded-full transition-all duration-1000" style={{ width: `${tasksTotal ? (tasksDone/tasksTotal)*100 : 0}%` }}></div></div></div>
-                    <div className="bg-white dark:bg-dark-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between"><div><div className="flex justify-between mb-2"><div className="flex items-center gap-1 text-orange-500 font-bold text-sm"><Flame size={16} /> Calories</div><span className="text-xs text-gray-500">{calCurrent}/{goals.calories}</span></div><div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full mb-4"><div className="bg-orange-500 h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min((calCurrent/goals.calories)*100, 100)}%` }}></div></div></div></div>
+                    
+                    {/* Fixed: Protein Progress Added back */}
+                    <div className="bg-white dark:bg-dark-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between">
+                        <div>
+                            <div className="flex justify-between mb-2"><div className="flex items-center gap-1 text-orange-500 font-bold text-sm"><Flame size={16} /> Calories</div><span className="text-xs text-gray-500">{calCurrent}/{goals.calories}</span></div>
+                            <div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full mb-4"><div className="bg-orange-500 h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min((calCurrent/goals.calories)*100, 100)}%` }}></div></div>
+                            
+                            <div className="flex justify-between mb-2"><div className="flex items-center gap-1 text-blue-500 font-bold text-sm"><Zap size={16} /> Protein</div><span className="text-xs text-gray-500">{protCurrent}g/{goals.protein}g</span></div>
+                            <div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full mb-4"><div className="bg-blue-500 h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min((protCurrent/goals.protein)*100, 100)}%` }}></div></div>
+                        </div>
+                    </div>
+
                     <div className="bg-white dark:bg-dark-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex items-center justify-between"><div><div className="flex items-center gap-2 text-cyan-500 font-bold text-sm mb-2"><Droplet size={20} /> Water</div><div className="text-3xl font-bold text-gray-900 dark:text-white">{waterCurrent}L</div></div><WaterProgressCircle value={waterCurrent} max={goals.water} color="#06b6d4" size={80} /></div>
+                    
+                    {/* Fixed: Gym Status Added back */}
+                    <div className={`p-6 rounded-2xl border shadow-sm flex flex-col justify-center items-center gap-2 transition ${gymDone ? 'bg-green-50 border-green-100 dark:bg-green-900/20 dark:border-green-900' : 'bg-white border-gray-100 dark:bg-dark-800 dark:border-gray-700'}`}>
+                        <div className={`p-3 rounded-full ${gymDone ? 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-400 dark:bg-gray-700'}`}>
+                            <Dumbbell size={32} />
+                        </div>
+                        <div className={`text-lg font-bold ${gymDone ? 'text-green-700 dark:text-green-400' : 'text-gray-500'}`}>
+                            {gymDone ? 'Workout Done!' : 'No Workout'}
+                        </div>
+                        {!gymDone && <p className="text-xs text-gray-400">Go lift something heavy!</p>}
+                    </div>
                 </div>
             );
         }
@@ -357,13 +385,196 @@
         function TodoSection({ userId, selectedDate }) {
             const { showToast } = useContext(ToastContext);
             const { data: tasks, add: addTaskToDb, update: updateTaskInDb, remove: removeTaskFromDb } = useFirestore(userId, 'todos');
+            const { data: dailyRules, add: addRule, update: updateRule } = useFirestore(userId, 'dailyRules');
+            const { data: deletedInstances, add: addDeletedInstance, remove: removeDeletedInstance } = useFirestore(userId, 'deletedInstances');
+            
+            const [localTasks, setLocalTasks] = useState([]);
             const [newTask, setNewTask] = useState('');
-            const todaysTasks = tasks.filter(t => t.date === selectedDate);
-            const handleAddTask = (e) => { e.preventDefault(); if(!newTask.trim()) return; addTaskToDb({ text: newTask, completed: false, date: selectedDate }); setNewTask(''); showToast('Task Added'); };
+            const [activeTaskForDetails, setActiveTaskForDetails] = useState(null);
+            const [category, setCategory] = useState('General');
+            const [showFrequencyModal, setShowFrequencyModal] = useState(false);
+            const [pendingTaskForFrequency, setPendingTaskForFrequency] = useState(null);
+            const [showBulkAdd, setShowBulkAdd] = useState(false);
+
+            useEffect(() => {
+                const manualTasks = tasks.filter(t => t.date === selectedDate);
+                const generatedTasks = [];
+                const dayOfWeek = new Date(selectedDate).getDay();
+
+                dailyRules.forEach(rule => {
+                    const isStarted = rule.startDate <= selectedDate;
+                    const isNotEnded = rule.endDate === null || rule.endDate >= selectedDate;
+                    const isCorrectDay = !rule.days || rule.days.includes(dayOfWeek);
+
+                    if (isStarted && isNotEnded && isCorrectDay) {
+                        const deletedDoc = deletedInstances.find(d => d.ruleId === rule.id && d.date === selectedDate);
+                        const exists = tasks.some(t => t.ruleId === rule.id && t.date === selectedDate);
+                        
+                        if (!deletedDoc && !exists) {
+                            const derivedTime = isNaN(Number(rule.id)) ? '0' : new Date(Number(rule.id)).toISOString();
+                            generatedTasks.push({ id: `virtual_${rule.id}_${selectedDate}`, text: rule.text, category: rule.category, completed: false, date: selectedDate, ruleId: rule.id, subtasks: [], note: "", isVirtual: true, createdAt: derivedTime });
+                        }
+                    }
+                });
+
+                const combined = [...manualTasks, ...generatedTasks];
+                combined.sort((a, b) => {
+                    const dateA = a.createdAt || ''; 
+                    const dateB = b.createdAt || '';
+                    if (dateB < dateA) return -1;
+                    if (dateB > dateA) return 1;
+                    return 0;
+                });
+                
+                setLocalTasks(combined);
+            }, [tasks, dailyRules, deletedInstances, selectedDate]);
+
+            const handleAddTask = (e) => { 
+                e.preventDefault(); 
+                if(!newTask.trim()) return; 
+                addTaskToDb({ 
+                    text: newTask, 
+                    category: category, 
+                    completed: false, 
+                    date: selectedDate, 
+                    subtasks: [], 
+                    note: "" 
+                }); 
+                setNewTask(''); 
+                showToast('Task Added'); 
+            };
+
+            const handleToggleTask = (task) => { if (isVirtualItem(task)) { addTaskToDb({ text: task.text, category: task.category, date: selectedDate, ruleId: task.ruleId, subtasks: [], note: "", completed: !task.completed }); } else { updateTaskInDb(task.id, { completed: !task.completed }); } };
+            
+            const handleDeleteTask = (task) => { 
+                if (isVirtualItem(task)) { 
+                    addDeletedInstance({ ruleId: task.ruleId, date: selectedDate }).then((ref) => {
+                        showToast('Task Deleted', 'default', {
+                            label: 'UNDO',
+                            onClick: () => removeDeletedInstance(ref.id)
+                        });
+                    });
+                } else { 
+                    const taskData = { ...task };
+                    const cleanTaskData = cleanData(taskData);
+                    removeTaskFromDb(task.id);
+                    if (task.ruleId) { 
+                        addDeletedInstance({ ruleId: task.ruleId, date: selectedDate }).then((ref) => {
+                             showToast('Task Deleted', 'default', { label: 'UNDO', onClick: () => { removeDeletedInstance(ref.id); } });
+                        });
+                    } else {
+                        showToast('Task Deleted', 'default', {
+                            label: 'UNDO',
+                            onClick: () => addTaskToDb(cleanTaskData)
+                        });
+                    }
+                } 
+            };
+
+            const handleUpdateDetails = (taskId, updatedData) => { 
+                const task = localTasks.find(t => t.id === taskId);
+                if (isVirtualItem(task)) { addTaskToDb({ text: task.text, category: task.category, date: selectedDate, ruleId: task.ruleId, subtasks: updatedData.subtasks, note: updatedData.note, completed: task.completed }); setActiveTaskForDetails(null); }
+                else { updateTaskInDb(taskId, { subtasks: updatedData.subtasks, note: updatedData.note }); if (activeTaskForDetails && activeTaskForDetails.id === taskId) setActiveTaskForDetails(updatedData); }
+            };
+
+            const initiateToggleDaily = (task) => {
+                const rule = dailyRules.find(r => r.id === task.ruleId);
+                const isRepeating = rule && (rule.endDate === null || rule.endDate > selectedDate);
+                
+                if (isRepeating) {
+                    if(rule) updateRule(rule.id, { endDate: selectedDate });
+                    showToast('Recurring Disabled');
+                } else {
+                    setPendingTaskForFrequency(task);
+                    setShowFrequencyModal(true);
+                }
+            };
+
+            const confirmToggleDaily = (days) => {
+                const task = pendingTaskForFrequency;
+                const rule = dailyRules.find(r => r.id === task.ruleId);
+                if (rule) {
+                    updateRule(rule.id, { endDate: null, days: days });
+                } else {
+                    addRule({ text: task.text, category: task.category, startDate: selectedDate, endDate: null, days: days })
+                        .then(docRef => updateTaskInDb(task.id, { ruleId: docRef.id }));
+                }
+                setShowFrequencyModal(false);
+                setPendingTaskForFrequency(null);
+                showToast('Recurring Enabled');
+            };
+
+            const handleBulkAdd = (tasks) => {
+                tasks.forEach(t => {
+                    setTimeout(() => {
+                        addTaskToDb({
+                            text: t.text,
+                            category: t.category,
+                            completed: false,
+                            date: t.date,
+                            subtasks: [],
+                            note: ""
+                        });
+                    }, 50);
+                });
+                showToast(`${tasks.length} Tasks Added!`);
+            };
+
+            const getCategoryColor = (cat) => {
+                switch(cat) {
+                    case 'Work': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300';
+                    case 'Health': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300';
+                    case 'Personal': return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300';
+                    default: return 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300';
+                }
+            };
+
             return (
                 <div className="space-y-6 animate-fade-in">
-                    <form onSubmit={handleAddTask} className="flex gap-3"><input type="text" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a new task..." className="flex-1 p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500" /><button className="bg-primary-600 text-white px-6 rounded-xl font-bold shadow-md hover:bg-primary-700 transition"><Plus size={20} /></button></form>
-                    <div className="space-y-3 pb-24 md:pb-0">{todaysTasks.map(task => (<div key={task.id} className={`flex items-center justify-between p-4 bg-white dark:bg-dark-800 rounded-xl shadow-sm border-l-4 transition-all ${task.completed ? 'border-green-500 opacity-60' : 'border-primary-500'}`}><div className="flex items-center gap-3 overflow-hidden"><button onClick={() => updateTaskInDb(task.id, { completed: !task.completed })} className={task.completed ? 'text-green-500' : 'text-gray-300'}>{task.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button><span className={`font-medium truncate ${task.completed ? 'line-through text-gray-400' : 'text-gray-800 dark:text-white'}`}>{task.text}</span></div><button onClick={() => removeTaskFromDb(task.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={18} /></button></div>))}</div>
+                    <form onSubmit={handleAddTask} className="flex flex-col gap-3">
+                        <input type="text" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a new task..." className="w-full p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-dark-800 dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        <div className="flex gap-2">
+                            <button type="button" onClick={() => setShowBulkAdd(true)} className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-dark-800 text-slate-500 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"><ListIcon size={24} /></button>
+                            <select value={category} onChange={(e) => setCategory(e.target.value)} className="flex-1 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-dark-800 dark:text-white text-sm focus:outline-none">
+                                <option value="General">General</option>
+                                <option value="Work">Work</option>
+                                <option value="Health">Health</option>
+                                <option value="Personal">Personal</option>
+                            </select>
+                            <button className="bg-primary-600 text-white px-6 rounded-xl font-bold shadow-md hover:bg-primary-700 transition flex items-center gap-2"><Plus size={20} /> Add</button>
+                        </div>
+                    </form>
+
+                    <div className="space-y-3 pb-24 md:pb-0">
+                        {localTasks.map(task => {
+                            const activeRule = dailyRules.find(r => r.id === task.ruleId);
+                            const isRepeating = activeRule && (activeRule.endDate === null || activeRule.endDate > selectedDate);
+                            const subtaskCount = task.subtasks ? task.subtasks.length : 0;
+                            const completedSubtasks = task.subtasks ? task.subtasks.filter(s => s.completed).length : 0;
+                            return (
+                                <div key={task.id} className={`flex items-center justify-between p-4 bg-white dark:bg-dark-800 rounded-xl shadow-sm border-l-4 transition-all ${task.completed ? 'border-green-500 opacity-60' : 'border-primary-500'}`}>
+                                    <div className="flex items-center gap-3 overflow-hidden flex-1">
+                                        <button onClick={() => handleToggleTask(task)} className={`text-xl ${task.completed ? 'text-green-500' : 'text-slate-300 dark:text-slate-600'}`}>{task.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
+                                        <div className="flex flex-col overflow-hidden">
+                                            <span className={`font-medium truncate ${task.completed ? 'line-through text-slate-400' : 'text-slate-800 dark:text-white'}`}>{task.text} {isRepeating && <Repeat size={12} className="inline ml-1 text-primary-400" />}</span>
+                                            <div className="flex items-center gap-2 mt-1">
+                                                <span className={`text-[10px] px-2 py-0.5 rounded-full w-fit ${getCategoryColor(task.category)}`}>{task.category}</span>
+                                                {subtaskCount > 0 && <span className="text-[10px] px-2 py-0.5 rounded-full w-fit bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 flex items-center gap-1"><FileText size={10} /> {completedSubtasks}/{subtaskCount}</span>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-3 ml-2">
+                                        <button onClick={() => setActiveTaskForDetails(task)} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-lg text-slate-500 dark:text-slate-300"><FileText size={18} /></button>
+                                        <button onClick={() => initiateToggleDaily(task)} className={`w-8 h-5 rounded-full relative transition-colors ${isRepeating ? 'bg-primary-600' : 'bg-slate-200 dark:bg-slate-700'}`}><span className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full transition-transform ${isRepeating ? 'translate-x-3' : ''}`}></span></button>
+                                        <button onClick={() => handleDeleteTask(task)} className="text-slate-300 hover:text-red-500"><Trash2 size={18} /></button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                    {activeTaskForDetails && <TaskDetailsPage task={activeTaskForDetails} onClose={() => setActiveTaskForDetails(null)} onUpdate={handleUpdateDetails} />}
+                    {showFrequencyModal && <FrequencyModal onClose={() => { setShowFrequencyModal(false); setPendingTaskForFrequency(null); }} onSave={confirmToggleDaily} initialDays={pendingTaskForFrequency?.ruleId ? dailyRules.find(r => r.id === pendingTaskForFrequency.ruleId)?.days : undefined} />}
+                    {showBulkAdd && <BulkAddModal onClose={() => setShowBulkAdd(false)} onAdd={handleBulkAdd} selectedDate={selectedDate} />}
                 </div>
             );
         }
@@ -372,21 +583,132 @@
             const { data: workouts, add: addWorkout, remove: deleteWorkout } = useFirestore(userId, 'gym');
             const [entry, setEntry] = useState({ exercise: '', sets: '', reps: '', weight: '' });
             const { showToast } = useContext(ToastContext);
-            const addSet = (e) => { e.preventDefault(); if (!entry.exercise) return; addWorkout({ ...entry, date: selectedDate }); setEntry({ ...entry, sets: '', reps: '', weight: '' }); showToast('Set Logged'); };
+
+            const addSet = (e) => {
+                e.preventDefault(); if (!entry.exercise) return;
+                addWorkout({ ...entry, date: selectedDate });
+                setEntry({ ...entry, sets: '', reps: '', weight: '' });
+                showToast('Set Logged');
+            };
+
+            const handleDeleteWorkout = (id) => {
+                 const workoutToRestore = workouts.find(w => w.id === id);
+                 const { id: _, ...data } = workoutToRestore; 
+                 const cleanWorkoutData = cleanData(data);
+                 deleteWorkout(id);
+                 showToast('Workout Deleted', 'default', { label: 'UNDO', onClick: () => addWorkout(cleanWorkoutData) });
+            };
+
             const todaysWorkouts = workouts.filter(w => w.date === selectedDate);
+            todaysWorkouts.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
             return (
                 <div className="space-y-6 animate-fade-in"><div className="bg-white dark:bg-dark-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700"><h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-gray-900 dark:text-white"><Dumbbell className="text-primary-600" size={24} /> Log Workout</h2><form onSubmit={addSet} className="space-y-4"><input type="text" placeholder="Exercise Name" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" value={entry.exercise} onChange={e => setEntry({...entry, exercise: e.target.value})} /><div className="grid grid-cols-3 gap-3"><input type="number" placeholder="kg" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 text-center dark:text-white" value={entry.weight} onChange={e => setEntry({...entry, weight: e.target.value})} /><input type="number" placeholder="Sets" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 text-center dark:text-white" value={entry.sets} onChange={e => setEntry({...entry, sets: e.target.value})} /><input type="number" placeholder="Reps" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 text-center dark:text-white" value={entry.reps} onChange={e => setEntry({...entry, reps: e.target.value})} /></div><button className="w-full bg-gray-900 dark:bg-white text-white dark:text-gray-900 py-3 rounded-xl font-bold shadow-md hover:opacity-90">Log Set</button></form></div><div className="space-y-3 pb-20 md:pb-0">{todaysWorkouts.map((w) => (<div key={w.id} className="bg-white dark:bg-dark-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 flex justify-between items-center hover-card"><div><p className="font-bold text-gray-800 dark:text-white">{w.exercise}</p><p className="text-sm text-gray-500 dark:text-gray-400">{w.weight}kg × {w.sets} sets × {w.reps} reps</p></div><button onClick={() => deleteWorkout(w.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={18} /></button></div>))}</div></div>
             );
         }
 
-        function DietSection({ userId, selectedDate }) {
+        function DietSection({ userId, selectedDate, goals }) {
             const { data: meals, add: addMealDb, update: updateMealDb, remove: removeMealDb } = useFirestore(userId, 'diet');
+            const { data: dietRules, add: addDietRule, update: updateDietRule } = useFirestore(userId, 'dietRules');
+            const { data: deletedDietInstances, add: addDeletedDiet, remove: removeDeletedDiet } = useFirestore(userId, 'deletedDiet');
+            const { data: waterLogs, add: addWaterLog, update: updateWaterLog } = useFirestore(userId, 'water');
+            const [localMeals, setLocalMeals] = useState([]);
             const [newMeal, setNewMeal] = useState({ name: '', calories: '', protein: '' });
             const { showToast } = useContext(ToastContext);
-            const manualMeals = meals.filter(m => m.date === selectedDate);
+            const [mounted, setMounted] = useState(false);
+            const [showFrequencyModal, setShowFrequencyModal] = useState(false);
+            const [pendingMealForFrequency, setPendingMealForFrequency] = useState(null);
+
+            useEffect(() => { setTimeout(() => setMounted(true), 50); }, []);
+
+            useEffect(() => {
+                const manualMeals = meals.filter(m => m.date === selectedDate);
+                const generatedMeals = [];
+                const dayOfWeek = new Date(selectedDate).getDay();
+
+                dietRules.forEach(rule => {
+                    const isStarted = rule.startDate <= selectedDate;
+                    const isNotEnded = rule.endDate === null || rule.endDate >= selectedDate;
+                    const isCorrectDay = !rule.days || rule.days.includes(dayOfWeek);
+
+                    if (isStarted && isNotEnded && isCorrectDay) {
+                        const isDeleted = deletedDietInstances.some(d => d.ruleId === rule.id && d.date === selectedDate);
+                        const exists = meals.some(m => m.ruleId === rule.id && m.date === selectedDate);
+                        if (!isDeleted && !exists) {
+                            const derivedTime = isNaN(Number(rule.id)) ? '0' : new Date(Number(rule.id)).toISOString();
+                            generatedMeals.push({ id: `virtual_${rule.id}_${selectedDate}`, date: selectedDate, name: rule.name, calories: rule.calories, protein: rule.protein, completed: false, ruleId: rule.id, isVirtual: true, createdAt: derivedTime });
+                        }
+                    }
+                });
+                
+                const combined = [...manualMeals, ...generatedMeals];
+                combined.sort((a, b) => {
+                    const dateA = a.createdAt || ''; 
+                    const dateB = b.createdAt || '';
+                    if (dateB < dateA) return -1;
+                    if (dateB > dateA) return 1;
+                    return 0;
+                });
+                setLocalMeals(combined);
+            }, [meals, dietRules, deletedDietInstances, selectedDate]);
+
+            const todayWaterLog = waterLogs.find(w => w.date === selectedDate);
+            const currentWater = todayWaterLog ? todayWaterLog.amount : 0;
+            const updateWater = (amount) => { if (todayWaterLog) { updateWaterLog(todayWaterLog.id, { amount }); } else { addWaterLog({ date: selectedDate, amount }); } };
             const handleAddMeal = (e) => { e.preventDefault(); if (!newMeal.name) return; addMealDb({ ...newMeal, date: selectedDate, completed: false }); setNewMeal({ name: '', calories: '', protein: '' }); showToast('Meal Added'); };
+            const handleToggleMeal = (meal) => { if (isVirtualItem(meal)) { addMealDb({ ...meal, isVirtual: false, completed: !meal.completed }); } else { updateMealDb(meal.id, { completed: !meal.completed }); } };
+            
+            const handleDeleteMeal = (meal) => { 
+                if (isVirtualItem(meal)) { 
+                    addDeletedDiet({ ruleId: meal.ruleId, date: selectedDate }).then((ref) => {
+                        showToast('Meal Deleted', 'default', { label: 'UNDO', onClick: () => removeDeletedDiet(ref.id) });
+                    });
+                } else { 
+                    const mealData = { ...meal };
+                    const cleanMealData = cleanData(mealData);
+                    removeMealDb(meal.id);
+                    if (meal.ruleId) {
+                         addDeletedDiet({ ruleId: meal.ruleId, date: selectedDate }).then((ref) => {
+                             showToast('Meal Deleted', 'default', { label: 'UNDO', onClick: () => { removeDeletedDiet(ref.id); } });
+                         });
+                    } else {
+                         showToast('Meal Deleted', 'default', { label: 'UNDO', onClick: () => addMealDb(cleanMealData) });
+                    }
+                } 
+            };
+
+            const initiateToggleDaily = (meal) => {
+                const rule = dietRules.find(r => r.id === meal.ruleId);
+                const isRepeating = rule && (rule.endDate === null || rule.endDate > selectedDate);
+                
+                if (isRepeating) {
+                    if(rule) updateDietRule(rule.id, { endDate: selectedDate });
+                    showToast('Recurring Disabled');
+                } else {
+                    setPendingMealForFrequency(meal);
+                    setShowFrequencyModal(true);
+                }
+            };
+
+            const confirmToggleDaily = (days) => {
+                const meal = pendingMealForFrequency;
+                const rule = dietRules.find(r => r.id === meal.ruleId);
+                if (rule) {
+                    updateDietRule(rule.id, { endDate: null, days: days });
+                } else {
+                    addDietRule({ name: meal.name, calories: meal.calories, protein: meal.protein, startDate: selectedDate, endDate: null, days: days })
+                        .then(docRef => updateMealDb(meal.id, { ruleId: docRef.id }));
+                }
+                setShowFrequencyModal(false);
+                setPendingMealForFrequency(null);
+                showToast('Recurring Enabled');
+            };
+
+            const totalCals = localMeals.filter(m => m.completed).reduce((acc, curr) => acc + Number(curr.calories), 0);
+            const totalProt = localMeals.filter(m => m.completed).reduce((acc, curr) => acc + Number(curr.protein), 0);
+
             return (
-                <div className="space-y-6 animate-fade-in pb-20 md:pb-0"><div className="bg-white dark:bg-dark-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700"><h3 className="font-bold text-gray-900 dark:text-white mb-4">Log Meal</h3><form onSubmit={handleAddMeal} className="flex flex-col gap-3"><input type="text" placeholder="Add Meal (e.g. Oats)" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" value={newMeal.name} onChange={e => setNewMeal({...newMeal, name: e.target.value})} /><div className="flex gap-2"><input type="number" placeholder="Cals" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={newMeal.calories} onChange={e => setNewMeal({...newMeal, calories: e.target.value})} /><input type="number" placeholder="Prot" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={newMeal.protein} onChange={e => setNewMeal({...newMeal, protein: e.target.value})} /><button className="bg-green-600 text-white px-4 rounded-xl font-bold"><Plus /></button></div></form></div><div className="space-y-3">{manualMeals.map(meal => (<div key={meal.id} className={`flex items-center justify-between p-3 bg-white dark:bg-dark-800 rounded-xl border border-gray-100 dark:border-gray-700 hover:shadow-sm transition hover:bg-gray-50 dark:hover:bg-gray-800/50 ${meal.completed ? 'opacity-50' : ''}`}><div className="flex items-center gap-3 overflow-hidden flex-1"><button onClick={() => updateMealDb(meal.id, { completed: !meal.completed })} className={`text-xl ${meal.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{meal.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button><div><p className={`font-medium text-gray-800 dark:text-white ${meal.completed ? 'line-through' : ''}`}>{meal.name}</p><p className="text-xs text-gray-500 dark:text-gray-400">{meal.calories} cal • {meal.protein}g prot</p></div></div><button onClick={() => removeMealDb(meal.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={18} /></button></div>))}</div></div>
+                <div className="space-y-6 animate-fade-in pb-20 md:pb-0"><div className="bg-white dark:bg-dark-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700"><h3 className="font-bold text-gray-900 dark:text-white mb-4">Log Meal</h3><form onSubmit={handleAddMeal} className="flex flex-col gap-3"><input type="text" placeholder="Add Meal (e.g. Oats)" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" value={newMeal.name} onChange={e => setNewMeal({...newMeal, name: e.target.value})} /><div className="flex gap-2"><input type="number" placeholder="Cals" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={newMeal.calories} onChange={e => setNewMeal({...newMeal, calories: e.target.value})} /><input type="number" placeholder="Prot" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={newMeal.protein} onChange={e => setNewMeal({...newMeal, protein: e.target.value})} /><button className="bg-green-600 text-white px-4 rounded-xl font-bold"><Plus /></button></div></form></div><div className="space-y-3">{localMeals.map(meal => {const activeRule = dietRules.find(r => r.id === meal.ruleId);const isRepeating = activeRule && (activeRule.endDate === null || activeRule.endDate > selectedDate);return (<div key={meal.id} className={`flex items-center justify-between p-3 bg-white dark:bg-dark-800 rounded-xl border border-gray-100 dark:border-gray-700 hover:shadow-sm transition hover:bg-gray-50 dark:hover:bg-gray-800/50 ${meal.completed ? 'opacity-50' : ''}`}><div className="flex items-center gap-3 overflow-hidden flex-1"><button onClick={() => handleToggleMeal(meal)} className={`text-xl ${meal.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{meal.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button><div><p className={`font-medium text-gray-800 dark:text-white ${meal.completed ? 'line-through' : ''}`}>{meal.name}</p><p className="text-xs text-gray-500 dark:text-gray-400">{meal.calories} cal • {meal.protein}g prot</p></div></div><div className="flex items-center gap-3 ml-2"><button onClick={() => initiateToggleDaily(meal)} className={`w-8 h-5 rounded-full relative transition-colors ${isRepeating ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'}`}><span className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full transition-transform ${isRepeating ? 'translate-x-3' : ''}`}></span></button><button onClick={() => handleDeleteMeal(meal)} className="text-gray-300 hover:text-red-500"><Trash2 size={18} /></button></div></div>);})}</div>{showFrequencyModal && <FrequencyModal onClose={() => { setShowFrequencyModal(false); setPendingMealForFrequency(null); }} onSave={confirmToggleDaily} initialDays={pendingMealForFrequency?.ruleId ? dietRules.find(r => r.id === pendingMealForFrequency.ruleId)?.days : undefined} />}</div>
             );
         }
 
@@ -418,7 +740,7 @@
                         </nav>
                         <section className="pt-32 pb-20 lg:pt-40 lg:pb-28 overflow-hidden"><div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center"><div className="inline-flex items-center px-3 py-1 rounded-full bg-primary-50 text-primary-600 text-sm font-medium mb-6"><span className="mr-2">✨</span> New: AI-Powered Insights 2.0</div><h1 className="text-5xl lg:text-7xl font-bold tracking-tight mb-8 text-gray-900">Track Your Life <br /><span className="gradient-text">Better Than Ever</span></h1><p className="text-xl text-gray-600 mb-10 max-w-2xl mx-auto leading-relaxed">The all-in-one platform for tracking habits, health, and goals.</p><div className="flex flex-col sm:flex-row justify-center gap-4"><button onClick={() => setAuthModal('register')} className="px-8 py-4 bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-xl font-semibold text-lg hover:shadow-xl hover:shadow-primary-600/20">Start Tracking Free</button><button className="px-8 py-4 bg-white text-gray-700 border border-gray-200 rounded-xl font-semibold text-lg hover:bg-gray-50 flex items-center justify-center gap-2"><PlayCircle className="w-5 h-5" /> Watch Demo</button></div></div></section>
                         <section id="features" className="py-20 bg-white"><div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"><div className="text-center mb-16"><h2 className="text-3xl font-bold text-gray-900 mb-4">Everything you need to succeed</h2><p className="text-lg text-gray-600">Powerful tools designed to help you build better habits.</p></div><div className="grid md:grid-cols-3 gap-8">{[{ icon: HeartPulse, title: 'Health Tracking', desc: 'Monitor vitals & sleep.' }, { icon: Target, title: 'Daily Goals', desc: 'Crush your objectives.' }, { icon: BarChart2, title: 'Analytics', desc: 'Visualize your growth.' }].map((f, i) => (<div key={i} className="p-8 rounded-2xl bg-gray-50 border border-gray-100 hover:border-primary-200 hover:shadow-lg transition group"><div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center mb-6 group-hover:bg-primary-600 transition"><f.icon className="w-6 h-6 text-primary-600 group-hover:text-white transition" /></div><h3 className="text-xl font-bold mb-3">{f.title}</h3><p className="text-gray-600">{f.desc}</p></div>))}</div></div></section>
-                        <section id="pricing" className="py-20 bg-gray-50"><div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"><div className="text-center mb-16"><h2 className="text-3xl font-bold text-gray-900 mb-4">Simple, transparent pricing</h2><p className="text-lg text-gray-600">Choose the plan that fits your lifestyle.</p></div><div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto"><div className="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition"><h3 className="text-xl font-bold text-gray-900">Starter</h3><div className="my-4"><span className="text-4xl font-bold">Free</span></div><p class="text-gray-500 mb-6 text-sm">Forever free for individuals.</p><ul class="space-y-3 mb-8"><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> Basic Tracking</li><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> 3 Goals per day</li><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> 7-day history</li></ul><button onClick={() => setAuthModal('register')} class="w-full py-3 px-4 border border-gray-200 rounded-xl font-medium text-gray-600 hover:bg-gray-50 transition">Get Started</button></div><div class="bg-white p-8 rounded-2xl border-2 border-primary-600 shadow-xl relative transform scale-105 z-10"><div class="absolute top-0 right-0 bg-primary-600 text-white text-xs font-bold px-3 py-1 rounded-bl-xl rounded-tr-xl">POPULAR</div><h3 class="text-xl font-bold text-gray-900">Pro</h3><div class="my-4"><span class="text-4xl font-bold">₹99</span><span class="text-gray-500">/mo</span></div><p class="text-gray-500 mb-6 text-sm">For serious self-improvers.</p><ul class="space-y-3 mb-8"><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> Unlimited Tracking</li><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> Advanced Charts</li><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> Priority Support</li></ul><button onClick={() => setAuthModal('register')} class="w-full py-3 px-4 bg-primary-600 text-white rounded-xl font-medium hover:bg-primary-700 transition shadow-lg shadow-primary-600/25">Upgrade to Pro</button></div><div class="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition"><h3 class="text-xl font-bold text-gray-900">Premium</h3><div class="my-4"><span class="text-4xl font-bold">₹299</span><span class="text-gray-500">/mo</span></div><p class="text-gray-500 mb-6 text-sm">Complete access for power users.</p><ul class="space-y-3 mb-8"><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> AI Coaching</li><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> Data Export</li><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> Team Features</li></ul><button class="w-full py-3 px-4 border border-gray-200 rounded-xl font-medium text-gray-600 hover:bg-gray-50 transition">Contact Sales</button></div></div></div></section>
+                        <section id="pricing" className="py-20 bg-gray-50"><div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"><div className="text-center mb-16"><h2 className="text-3xl font-bold text-gray-900 mb-4">Simple, transparent pricing</h2><p className="text-lg text-gray-600">Choose the plan that fits your lifestyle.</p></div><div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto"><div className="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition"><h3 className="text-xl font-bold text-gray-900">Starter</h3><div className="my-4"><span className="text-4xl font-bold">Free</span></div><p className="text-gray-500 mb-6 text-sm">Forever free for individuals.</p><ul class="space-y-3 mb-8"><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> Basic Tracking</li><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> 3 Goals per day</li><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> 7-day history</li></ul><button onClick={() => setAuthModal('register')} class="w-full py-3 px-4 border border-gray-200 rounded-xl font-medium text-gray-600 hover:bg-gray-50 transition">Get Started</button></div><div class="bg-white p-8 rounded-2xl border-2 border-primary-600 shadow-xl relative transform scale-105 z-10"><div class="absolute top-0 right-0 bg-primary-600 text-white text-xs font-bold px-3 py-1 rounded-bl-xl rounded-tr-xl">POPULAR</div><h3 class="text-xl font-bold text-gray-900">Pro</h3><div class="my-4"><span class="text-4xl font-bold">₹99</span><span class="text-gray-500">/mo</span></div><p class="text-gray-500 mb-6 text-sm">For serious self-improvers.</p><ul class="space-y-3 mb-8"><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> Unlimited Tracking</li><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> Advanced Charts</li><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> Priority Support</li></ul><button onClick={() => setAuthModal('register')} class="w-full py-3 px-4 bg-primary-600 text-white rounded-xl font-medium hover:bg-primary-700 transition shadow-lg shadow-primary-600/25">Upgrade to Pro</button></div><div class="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition"><h3 class="text-xl font-bold text-gray-900">Premium</h3><div class="my-4"><span class="text-4xl font-bold">₹299</span><span class="text-gray-500">/mo</span></div><p class="text-gray-500 mb-6 text-sm">Complete access for power users.</p><ul class="space-y-3 mb-8"><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> AI Coaching</li><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> Data Export</li><li class="flex items-center text-gray-600 text-sm"><Check class="w-4 h-4 text-green-500 mr-2" /> Team Features</li></ul><button class="w-full py-3 px-4 border border-gray-200 rounded-xl font-medium text-gray-600 hover:bg-gray-50 transition">Contact Sales</button></div></div></div></section>
                         <section class="py-24 bg-gradient-to-br from-gray-900 via-primary-950 to-gray-900 text-white"><div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center"><h2 class="text-3xl md:text-5xl font-bold mb-8 leading-tight">Get weekly productivity tips. No spam.</h2><div class="max-w-xl mx-auto bg-gray-800/50 p-1.5 rounded-full border border-gray-700 flex items-center mb-6"><input type="email" placeholder="Enter your email" class="w-full bg-transparent px-6 py-3 text-white placeholder-gray-400 focus:outline-none rounded-l-full" /><button class="bg-white text-gray-900 font-bold text-base px-8 py-3 rounded-full hover:bg-gray-100 transition">Subscribe</button></div><div class="flex items-center justify-center gap-2 text-gray-500 text-xs"><Shield class="w-3 h-3" /><span>Secure. Private.</span></div></div></section>
                         <footer class="bg-white pt-20 pb-10 border-t border-gray-200"><div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"><div class="grid grid-cols-1 md:grid-cols-4 gap-12 mb-16"><div class="md:col-span-1"><div class="flex items-center gap-2 mb-6"><Activity class="text-primary-600 w-8 h-8" /><span class="font-bold text-2xl text-gray-900">LifeTrack Pro</span></div><p class="text-sm text-gray-500 mb-6 leading-relaxed">Making self-improvement accessible.</p><div class="flex gap-1 text-gray-400"><Star class="w-4 h-4 fill-current" /><Star class="w-4 h-4 fill-current" /><Star class="w-4 h-4 fill-current" /></div></div><div class="grid grid-cols-3 gap-8 md:col-span-3"><div><h4 class="font-bold text-base text-gray-900 mb-4">Product</h4><ul class="space-y-3"><li><a href="#" class="text-sm text-gray-500 hover:text-primary-600 transition">Features</a></li><li><a href="#" class="text-sm text-gray-500 hover:text-primary-600 transition">Pricing</a></li></ul></div><div><h4 class="font-bold text-base text-gray-900 mb-4">Company</h4><ul class="space-y-3"><li><a href="#" class="text-sm text-gray-500 hover:text-primary-600 transition">About</a></li><li><a href="#" class="text-sm text-gray-500 hover:text-primary-600 transition">Contact</a></li></ul></div><div><h4 class="font-bold text-base text-gray-900 mb-4">Legal</h4><ul class="space-y-3"><li><a href="#" class="text-sm text-gray-500 hover:text-primary-600 transition">Privacy</a></li><li><a href="#" class="text-sm text-gray-500 hover:text-primary-600 transition">Terms</a></li></ul></div></div></div><div class="pt-8 border-t border-gray-100 flex flex-col md:flex-row justify-between items-center text-xs text-gray-400"><p>© 2026 LifeTrack Pro.</p><p class="mt-4 md:mt-0">Made with passion.</p></div></div></footer>
                         
