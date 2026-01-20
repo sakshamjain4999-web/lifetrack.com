@@ -41,7 +41,6 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <style>
-        /* FIX: Removed overflow:hidden from body to allow Landing Page scrolling */
         html, body { height: 100%; margin: 0; padding: 0; }
         #root { height: 100%; }
         
@@ -248,7 +247,7 @@
             return { data, add, update, remove };
         }
 
-        // --- COMPONENTS ---
+        // --- SUB-COMPONENTS ---
         const Sidebar = ({ activeTab, setActiveTab, user, onLogout, darkMode, setDarkMode, setShowSettings }) => (
             <aside className="hidden md:flex w-64 flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-dark-800 p-4 h-full transition-colors">
                 <div className="flex items-center gap-2 text-primary-600 dark:text-primary-500 mb-8 px-2">
@@ -323,6 +322,138 @@
             );
         };
 
+        // --- MODALS DEFINED BEFORE USE ---
+        function BulkAddModal({ onClose, onAdd, selectedDate }) {
+            const [text, setText] = useState('');
+
+            const handleAdd = () => {
+                const lines = text.split('\n').filter(line => line.trim() !== '');
+                if (lines.length === 0) return onClose();
+
+                const tasksToAdd = [];
+                // Helper map for day names
+                const daysMap = { 'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3, 'thursday': 4, 'friday': 5, 'saturday': 6, 'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6 };
+
+                lines.forEach(line => {
+                    let taskText = line;
+                    let targetDate = selectedDate;
+                    let category = 'General';
+
+                    const parts = line.split(':');
+                    if (parts.length > 1) {
+                        const prefix = parts[0].trim().toLowerCase();
+                        const content = parts.slice(1).join(':').trim();
+                        if (content) { 
+                            if (prefix === 'tomorrow') {
+                                const dateObj = new Date(new Date(selectedDate).getTime() + (24 * 60 * 60 * 1000));
+                                targetDate = dateObj.toISOString().split('T')[0];
+                                taskText = content;
+                            } else if (prefix === 'today') {
+                                targetDate = selectedDate;
+                                taskText = content;
+                            }
+                        }
+                    }
+                    tasksToAdd.push({ text: taskText, date: targetDate, category });
+                });
+
+                onAdd(tasksToAdd);
+                onClose();
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 animate-fade-in backdrop-blur-sm">
+                    <div className="bg-white dark:bg-dark-800 rounded-2xl shadow-xl w-full max-w-md p-6 flex flex-col">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2"><ListIcon className="text-primary-600" /> Bulk Add Tasks</h3>
+                            <button onClick={onClose}><X size={24} className="text-gray-400" /></button>
+                        </div>
+                        <p className="text-xs text-gray-500 mb-2">Type each task on a new line. Prefixes: Tomorrow:, Today:</p>
+                        <textarea className="flex-1 w-full p-4 bg-gray-50 dark:bg-dark-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white resize-none mb-4 font-mono text-sm h-40" placeholder="Buy milk&#10;Clean room&#10;Tomorrow: Submit report" value={text} onChange={(e) => setText(e.target.value)} autoFocus></textarea>
+                        <button onClick={handleAdd} className="w-full py-3 bg-primary-600 text-white rounded-xl font-bold shadow-lg hover:bg-primary-700 transition">Add All Tasks</button>
+                    </div>
+                </div>
+            );
+        }
+
+        function FrequencyModal({ onClose, onSave, initialDays }) {
+            const [selectedDays, setSelectedDays] = useState(initialDays || [0,1,2,3,4,5,6]); 
+            const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+            const toggleDay = (index) => {
+                if (selectedDays.includes(index)) setSelectedDays(selectedDays.filter(d => d !== index));
+                else setSelectedDays([...selectedDays, index].sort());
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 animate-fade-in backdrop-blur-sm">
+                    <div className="bg-white dark:bg-dark-800 rounded-2xl shadow-xl w-full max-w-xs p-6">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Repeat On</h3>
+                        <div className="flex justify-between mb-4">
+                            {days.map((day, idx) => (
+                                <button key={idx} onClick={() => toggleDay(idx)} className={`w-8 h-8 rounded-full text-xs font-bold transition ${selectedDays.includes(idx) ? 'bg-primary-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300'}`}>{day}</button>
+                            ))}
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={onClose} className="flex-1 py-2 text-gray-500 dark:text-gray-400 font-medium">Cancel</button>
+                            <button onClick={() => onSave(selectedDays)} className="flex-1 py-2 bg-primary-600 text-white rounded-lg font-bold">Save</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function TaskDetailsPage({ task, onClose, onUpdate }) {
+            const [newSub, setNewSub] = useState('');
+            const [noteText, setNoteText] = useState(task.note || '');
+
+            const handleNoteChange = (e) => { setNoteText(e.target.value); onUpdate(task.id, { ...task, note: e.target.value }); };
+            const handleAddSub = (e) => { e.preventDefault(); if(!newSub.trim()) return; const updated = [...(task.subtasks || []), { id: Date.now(), text: newSub, completed: false }]; onUpdate(task.id, { ...task, subtasks: updated }); setNewSub(''); };
+            const toggleSub = (subId) => { const updated = task.subtasks.map(s => s.id === subId ? { ...s, completed: !s.completed } : s); onUpdate(task.id, { ...task, subtasks: updated }); };
+            const deleteSub = (subId) => { const updated = task.subtasks.filter(s => s.id !== subId); onUpdate(task.id, { ...task, subtasks: updated }); };
+            
+            const total = task.subtasks ? task.subtasks.length : 0;
+            const completed = task.subtasks ? task.subtasks.filter(s => s.completed).length : 0;
+
+            return (
+                <div className="fixed inset-0 bg-white dark:bg-dark-900 z-50 flex flex-col md:relative md:inset-auto md:z-auto md:h-full md:border-l md:border-gray-200 md:dark:border-gray-700 md:w-96 md:bg-gray-50 md:dark:bg-dark-800">
+                    <div className="bg-primary-600 p-4 text-white shadow-md flex items-center gap-3 md:rounded-t-xl">
+                        <button onClick={onClose} className="p-1 hover:bg-primary-700 rounded"><ArrowLeft size={24} /></button>
+                        <div className="flex-1"><h3 className="font-bold text-lg leading-tight truncate">{task.text}</h3></div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                        <div>
+                            <div className="flex justify-between items-center mb-2">
+                                <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Checklist</h4>
+                                <span className="text-xs font-medium bg-gray-100 dark:bg-dark-800 px-2 py-1 rounded text-gray-600 dark:text-gray-300">{completed}/{total} Done</span>
+                            </div>
+                            <form onSubmit={handleAddSub} className="flex gap-2 mb-3">
+                                <input type="text" value={newSub} onChange={e => setNewSub(e.target.value)} placeholder="Add subtask..." className="flex-1 p-3 bg-gray-50 dark:bg-dark-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white transition-all" />
+                                <button className="bg-primary-600 text-white px-4 rounded-xl hover:bg-primary-700 font-bold text-xl flex items-center justify-center"><Plus size={24} /></button>
+                            </form>
+                            <div className="space-y-2">
+                                {task.subtasks?.map(sub => (
+                                    <div key={sub.id} className="flex items-center justify-between p-3 bg-white dark:bg-dark-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm transition-all">
+                                        <div className="flex items-center gap-3 overflow-hidden flex-1">
+                                            <button onClick={() => toggleSub(sub.id)} className={`flex-shrink-0 text-xl transition-colors ${sub.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{sub.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
+                                            <span className={`text-base font-medium truncate ${sub.completed ? 'line-through text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-200'}`}>{sub.text}</span>
+                                        </div>
+                                        <button onClick={() => deleteSub(sub.id)} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={16} /></button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Notes</h4>
+                            <textarea value={noteText} onChange={handleNoteChange} placeholder="Type notes here..." className="w-full h-40 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400 text-gray-700 dark:text-yellow-100 resize-none leading-relaxed" />
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- SECTIONS ---
+
         function DashboardSection({ userId, selectedDate, goals }) {
             const { data: diet } = useFirestore(userId, 'diet');
             const { data: todos } = useFirestore(userId, 'todos');
@@ -331,17 +462,16 @@
             
             const todaysMeals = diet.filter(m => m.date === selectedDate && m.completed);
             const calCurrent = todaysMeals.reduce((acc, curr) => acc + Number(curr.calories), 0);
+            const protCurrent = todaysMeals.reduce((acc, curr) => acc + Number(curr.protein), 0);
             const waterLog = water.find(w => w.date === selectedDate);
             const waterCurrent = waterLog ? waterLog.amount : 0;
             const todaysTasks = todos.filter(t => t.date === selectedDate);
             const tasksDone = todaysTasks.filter(t => t.completed).length;
             const tasksTotal = todaysTasks.length;
             const gymDone = gym.some(w => w.date === selectedDate);
+
             const calPct = goals.calories ? Math.round((calCurrent/goals.calories)*100) : 0;
             const taskPct = tasksTotal ? Math.round((tasksDone/tasksTotal)*100) : 0;
-
-            // Updated Code to include Protein Progress Bar
-            const protCurrent = todaysMeals.reduce((acc, curr) => acc + Number(curr.protein), 0);
 
             return (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-fade-in">
@@ -353,31 +483,10 @@
                             <div className="border-l border-indigo-500/30 pl-16"><div className="text-4xl font-bold">{taskPct}%</div><div className="text-xs uppercase opacity-70 tracking-wider">Tasks Done</div></div>
                         </div>
                     </div>
-                    <div className="bg-white dark:bg-dark-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm"><div className="flex items-center gap-2 text-blue-500 mb-4 font-bold text-sm"><CheckSquare size={20} /> Tasks</div><div className="text-3xl font-bold text-gray-900 dark:text-white">{tasksDone} <span className="text-gray-400 text-lg">/ {tasksTotal}</span></div><div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full mt-4"><div className="bg-blue-500 h-full rounded-full transition-all duration-1000" style={{ width: `${tasksTotal ? (tasksDone/tasksTotal)*100 : 0}%` }}></div></div></div>
-                    
-                    {/* Fixed: Protein Progress Added back */}
-                    <div className="bg-white dark:bg-dark-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between">
-                        <div>
-                            <div className="flex justify-between mb-2"><div className="flex items-center gap-1 text-orange-500 font-bold text-sm"><Flame size={16} /> Calories</div><span className="text-xs text-gray-500">{calCurrent}/{goals.calories}</span></div>
-                            <div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full mb-4"><div className="bg-orange-500 h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min((calCurrent/goals.calories)*100, 100)}%` }}></div></div>
-                            
-                            <div className="flex justify-between mb-2"><div className="flex items-center gap-1 text-blue-500 font-bold text-sm"><Zap size={16} /> Protein</div><span className="text-xs text-gray-500">{protCurrent}g/{goals.protein}g</span></div>
-                            <div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full mb-4"><div className="bg-blue-500 h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min((protCurrent/goals.protein)*100, 100)}%` }}></div></div>
-                        </div>
-                    </div>
-
+                    <div className="bg-white dark:bg-dark-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm"><div className="flex items-center gap-2 text-primary-500 mb-4 font-bold text-sm"><CheckSquare size={20} /> Tasks</div><div className="text-3xl font-bold text-gray-900 dark:text-white">{tasksDone} <span className="text-gray-400 text-lg">/ {tasksTotal}</span></div><div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full mt-4"><div className="bg-primary-500 h-full rounded-full transition-all duration-1000" style={{ width: `${tasksTotal ? (tasksDone/tasksTotal)*100 : 0}%` }}></div></div></div>
+                    <div className="bg-white dark:bg-dark-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between"><div><div className="flex justify-between mb-2"><div className="flex items-center gap-1 text-orange-500 font-bold text-sm"><Flame size={16} /> Calories</div><span className="text-xs text-gray-500">{calCurrent}/{goals.calories}</span></div><div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full mb-4"><div className="bg-orange-500 h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min((calCurrent/goals.calories)*100, 100)}%` }}></div></div><div className="flex justify-between mb-2"><div className="flex items-center gap-1 text-primary-500 font-bold text-sm"><Zap size={16} /> Protein</div><span className="text-xs text-gray-500">{protCurrent}g/{goals.protein}g</span></div><div className="w-full bg-gray-100 dark:bg-gray-700 h-2 rounded-full mb-4"><div className="bg-primary-500 h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min((protCurrent/goals.protein)*100, 100)}%` }}></div></div></div></div>
                     <div className="bg-white dark:bg-dark-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex items-center justify-between"><div><div className="flex items-center gap-2 text-cyan-500 font-bold text-sm mb-2"><Droplet size={20} /> Water</div><div className="text-3xl font-bold text-gray-900 dark:text-white">{waterCurrent}L</div></div><WaterProgressCircle value={waterCurrent} max={goals.water} color="#06b6d4" size={80} /></div>
-                    
-                    {/* Fixed: Gym Status Added back */}
-                    <div className={`p-6 rounded-2xl border shadow-sm flex flex-col justify-center items-center gap-2 transition ${gymDone ? 'bg-green-50 border-green-100 dark:bg-green-900/20 dark:border-green-900' : 'bg-white border-gray-100 dark:bg-dark-800 dark:border-gray-700'}`}>
-                        <div className={`p-3 rounded-full ${gymDone ? 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-400 dark:bg-gray-700'}`}>
-                            <Dumbbell size={32} />
-                        </div>
-                        <div className={`text-lg font-bold ${gymDone ? 'text-green-700 dark:text-green-400' : 'text-gray-500'}`}>
-                            {gymDone ? 'Workout Done!' : 'No Workout'}
-                        </div>
-                        {!gymDone && <p className="text-xs text-gray-400">Go lift something heavy!</p>}
-                    </div>
+                    <div className={`p-6 rounded-2xl border shadow-sm flex flex-col justify-center items-center gap-2 transition ${gymDone ? 'bg-green-50 border-green-100 dark:bg-green-900/20 dark:border-green-900' : 'bg-white border-gray-100 dark:bg-dark-800 dark:border-gray-700'}`}><div className={`p-3 rounded-full ${gymDone ? 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-400 dark:bg-gray-700'}`}><Dumbbell size={32} /></div><div className={`text-lg font-bold ${gymDone ? 'text-green-700 dark:text-green-400' : 'text-gray-500'}`}>{gymDone ? 'Workout Done!' : 'No Workout'}</div>{!gymDone && <p className="text-xs text-gray-400">Go lift something heavy!</p>}</div>
                 </div>
             );
         }
@@ -522,20 +631,20 @@
 
             const getCategoryColor = (cat) => {
                 switch(cat) {
-                    case 'Work': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300';
+                    case 'Work': return 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300';
                     case 'Health': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300';
                     case 'Personal': return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300';
-                    default: return 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300';
+                    default: return 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
                 }
             };
 
             return (
                 <div className="space-y-6 animate-fade-in">
                     <form onSubmit={handleAddTask} className="flex flex-col gap-3">
-                        <input type="text" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a new task..." className="w-full p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-dark-800 dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                        <input type="text" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a new task..." className="w-full p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
                         <div className="flex gap-2">
-                            <button type="button" onClick={() => setShowBulkAdd(true)} className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-dark-800 text-slate-500 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"><ListIcon size={24} /></button>
-                            <select value={category} onChange={(e) => setCategory(e.target.value)} className="flex-1 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-dark-800 dark:text-white text-sm focus:outline-none">
+                            <button type="button" onClick={() => setShowBulkAdd(true)} className="p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition"><ListIcon size={24} /></button>
+                            <select value={category} onChange={(e) => setCategory(e.target.value)} className="flex-1 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 dark:text-white text-sm focus:outline-none">
                                 <option value="General">General</option>
                                 <option value="Work">Work</option>
                                 <option value="Health">Health</option>
@@ -554,19 +663,19 @@
                             return (
                                 <div key={task.id} className={`flex items-center justify-between p-4 bg-white dark:bg-dark-800 rounded-xl shadow-sm border-l-4 transition-all ${task.completed ? 'border-green-500 opacity-60' : 'border-primary-500'}`}>
                                     <div className="flex items-center gap-3 overflow-hidden flex-1">
-                                        <button onClick={() => handleToggleTask(task)} className={`text-xl ${task.completed ? 'text-green-500' : 'text-slate-300 dark:text-slate-600'}`}>{task.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
+                                        <button onClick={() => handleToggleTask(task)} className={`text-xl ${task.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{task.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
                                         <div className="flex flex-col overflow-hidden">
-                                            <span className={`font-medium truncate ${task.completed ? 'line-through text-slate-400' : 'text-slate-800 dark:text-white'}`}>{task.text} {isRepeating && <Repeat size={12} className="inline ml-1 text-primary-400" />}</span>
+                                            <span className={`font-medium truncate ${task.completed ? 'line-through text-gray-400' : 'text-gray-800 dark:text-white'}`}>{task.text} {isRepeating && <Repeat size={12} className="inline ml-1 text-primary-400" />}</span>
                                             <div className="flex items-center gap-2 mt-1">
                                                 <span className={`text-[10px] px-2 py-0.5 rounded-full w-fit ${getCategoryColor(task.category)}`}>{task.category}</span>
-                                                {subtaskCount > 0 && <span className="text-[10px] px-2 py-0.5 rounded-full w-fit bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 flex items-center gap-1"><FileText size={10} /> {completedSubtasks}/{subtaskCount}</span>}
+                                                {subtaskCount > 0 && <span className="text-[10px] px-2 py-0.5 rounded-full w-fit bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 flex items-center gap-1"><FileText size={10} /> {completedSubtasks}/{subtaskCount}</span>}
                                             </div>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-3 ml-2">
-                                        <button onClick={() => setActiveTaskForDetails(task)} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-lg text-slate-500 dark:text-slate-300"><FileText size={18} /></button>
-                                        <button onClick={() => initiateToggleDaily(task)} className={`w-8 h-5 rounded-full relative transition-colors ${isRepeating ? 'bg-primary-600' : 'bg-slate-200 dark:bg-slate-700'}`}><span className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full transition-transform ${isRepeating ? 'translate-x-3' : ''}`}></span></button>
-                                        <button onClick={() => handleDeleteTask(task)} className="text-slate-300 hover:text-red-500"><Trash2 size={18} /></button>
+                                        <button onClick={() => setActiveTaskForDetails(task)} className="p-1.5 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-300"><FileText size={18} /></button>
+                                        <button onClick={() => initiateToggleDaily(task)} className={`w-8 h-5 rounded-full relative transition-colors ${isRepeating ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'}`}><span className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full transition-transform ${isRepeating ? 'translate-x-3' : ''}`}></span></button>
+                                        <button onClick={() => handleDeleteTask(task)} className="text-gray-300 hover:text-red-500"><Trash2 size={18} /></button>
                                     </div>
                                 </div>
                             );
@@ -607,108 +716,14 @@
             );
         }
 
-        function DietSection({ userId, selectedDate, goals }) {
+        function DietSection({ userId, selectedDate }) {
             const { data: meals, add: addMealDb, update: updateMealDb, remove: removeMealDb } = useFirestore(userId, 'diet');
-            const { data: dietRules, add: addDietRule, update: updateDietRule } = useFirestore(userId, 'dietRules');
-            const { data: deletedDietInstances, add: addDeletedDiet, remove: removeDeletedDiet } = useFirestore(userId, 'deletedDiet');
-            const { data: waterLogs, add: addWaterLog, update: updateWaterLog } = useFirestore(userId, 'water');
-            const [localMeals, setLocalMeals] = useState([]);
             const [newMeal, setNewMeal] = useState({ name: '', calories: '', protein: '' });
             const { showToast } = useContext(ToastContext);
-            const [mounted, setMounted] = useState(false);
-            const [showFrequencyModal, setShowFrequencyModal] = useState(false);
-            const [pendingMealForFrequency, setPendingMealForFrequency] = useState(null);
-
-            useEffect(() => { setTimeout(() => setMounted(true), 50); }, []);
-
-            useEffect(() => {
-                const manualMeals = meals.filter(m => m.date === selectedDate);
-                const generatedMeals = [];
-                const dayOfWeek = new Date(selectedDate).getDay();
-
-                dietRules.forEach(rule => {
-                    const isStarted = rule.startDate <= selectedDate;
-                    const isNotEnded = rule.endDate === null || rule.endDate >= selectedDate;
-                    const isCorrectDay = !rule.days || rule.days.includes(dayOfWeek);
-
-                    if (isStarted && isNotEnded && isCorrectDay) {
-                        const isDeleted = deletedDietInstances.some(d => d.ruleId === rule.id && d.date === selectedDate);
-                        const exists = meals.some(m => m.ruleId === rule.id && m.date === selectedDate);
-                        if (!isDeleted && !exists) {
-                            const derivedTime = isNaN(Number(rule.id)) ? '0' : new Date(Number(rule.id)).toISOString();
-                            generatedMeals.push({ id: `virtual_${rule.id}_${selectedDate}`, date: selectedDate, name: rule.name, calories: rule.calories, protein: rule.protein, completed: false, ruleId: rule.id, isVirtual: true, createdAt: derivedTime });
-                        }
-                    }
-                });
-                
-                const combined = [...manualMeals, ...generatedMeals];
-                combined.sort((a, b) => {
-                    const dateA = a.createdAt || ''; 
-                    const dateB = b.createdAt || '';
-                    if (dateB < dateA) return -1;
-                    if (dateB > dateA) return 1;
-                    return 0;
-                });
-                setLocalMeals(combined);
-            }, [meals, dietRules, deletedDietInstances, selectedDate]);
-
-            const todayWaterLog = waterLogs.find(w => w.date === selectedDate);
-            const currentWater = todayWaterLog ? todayWaterLog.amount : 0;
-            const updateWater = (amount) => { if (todayWaterLog) { updateWaterLog(todayWaterLog.id, { amount }); } else { addWaterLog({ date: selectedDate, amount }); } };
+            const manualMeals = meals.filter(m => m.date === selectedDate);
             const handleAddMeal = (e) => { e.preventDefault(); if (!newMeal.name) return; addMealDb({ ...newMeal, date: selectedDate, completed: false }); setNewMeal({ name: '', calories: '', protein: '' }); showToast('Meal Added'); };
-            const handleToggleMeal = (meal) => { if (isVirtualItem(meal)) { addMealDb({ ...meal, isVirtual: false, completed: !meal.completed }); } else { updateMealDb(meal.id, { completed: !meal.completed }); } };
-            
-            const handleDeleteMeal = (meal) => { 
-                if (isVirtualItem(meal)) { 
-                    addDeletedDiet({ ruleId: meal.ruleId, date: selectedDate }).then((ref) => {
-                        showToast('Meal Deleted', 'default', { label: 'UNDO', onClick: () => removeDeletedDiet(ref.id) });
-                    });
-                } else { 
-                    const mealData = { ...meal };
-                    const cleanMealData = cleanData(mealData);
-                    removeMealDb(meal.id);
-                    if (meal.ruleId) {
-                         addDeletedDiet({ ruleId: meal.ruleId, date: selectedDate }).then((ref) => {
-                             showToast('Meal Deleted', 'default', { label: 'UNDO', onClick: () => { removeDeletedDiet(ref.id); } });
-                         });
-                    } else {
-                         showToast('Meal Deleted', 'default', { label: 'UNDO', onClick: () => addMealDb(cleanMealData) });
-                    }
-                } 
-            };
-
-            const initiateToggleDaily = (meal) => {
-                const rule = dietRules.find(r => r.id === meal.ruleId);
-                const isRepeating = rule && (rule.endDate === null || rule.endDate > selectedDate);
-                
-                if (isRepeating) {
-                    if(rule) updateDietRule(rule.id, { endDate: selectedDate });
-                    showToast('Recurring Disabled');
-                } else {
-                    setPendingMealForFrequency(meal);
-                    setShowFrequencyModal(true);
-                }
-            };
-
-            const confirmToggleDaily = (days) => {
-                const meal = pendingMealForFrequency;
-                const rule = dietRules.find(r => r.id === meal.ruleId);
-                if (rule) {
-                    updateDietRule(rule.id, { endDate: null, days: days });
-                } else {
-                    addDietRule({ name: meal.name, calories: meal.calories, protein: meal.protein, startDate: selectedDate, endDate: null, days: days })
-                        .then(docRef => updateMealDb(meal.id, { ruleId: docRef.id }));
-                }
-                setShowFrequencyModal(false);
-                setPendingMealForFrequency(null);
-                showToast('Recurring Enabled');
-            };
-
-            const totalCals = localMeals.filter(m => m.completed).reduce((acc, curr) => acc + Number(curr.calories), 0);
-            const totalProt = localMeals.filter(m => m.completed).reduce((acc, curr) => acc + Number(curr.protein), 0);
-
             return (
-                <div className="space-y-6 animate-fade-in pb-20 md:pb-0"><div className="bg-white dark:bg-dark-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700"><h3 className="font-bold text-gray-900 dark:text-white mb-4">Log Meal</h3><form onSubmit={handleAddMeal} className="flex flex-col gap-3"><input type="text" placeholder="Add Meal (e.g. Oats)" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" value={newMeal.name} onChange={e => setNewMeal({...newMeal, name: e.target.value})} /><div className="flex gap-2"><input type="number" placeholder="Cals" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={newMeal.calories} onChange={e => setNewMeal({...newMeal, calories: e.target.value})} /><input type="number" placeholder="Prot" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={newMeal.protein} onChange={e => setNewMeal({...newMeal, protein: e.target.value})} /><button className="bg-green-600 text-white px-4 rounded-xl font-bold"><Plus /></button></div></form></div><div className="space-y-3">{localMeals.map(meal => {const activeRule = dietRules.find(r => r.id === meal.ruleId);const isRepeating = activeRule && (activeRule.endDate === null || activeRule.endDate > selectedDate);return (<div key={meal.id} className={`flex items-center justify-between p-3 bg-white dark:bg-dark-800 rounded-xl border border-gray-100 dark:border-gray-700 hover:shadow-sm transition hover:bg-gray-50 dark:hover:bg-gray-800/50 ${meal.completed ? 'opacity-50' : ''}`}><div className="flex items-center gap-3 overflow-hidden flex-1"><button onClick={() => handleToggleMeal(meal)} className={`text-xl ${meal.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{meal.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button><div><p className={`font-medium text-gray-800 dark:text-white ${meal.completed ? 'line-through' : ''}`}>{meal.name}</p><p className="text-xs text-gray-500 dark:text-gray-400">{meal.calories} cal • {meal.protein}g prot</p></div></div><div className="flex items-center gap-3 ml-2"><button onClick={() => initiateToggleDaily(meal)} className={`w-8 h-5 rounded-full relative transition-colors ${isRepeating ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'}`}><span className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full transition-transform ${isRepeating ? 'translate-x-3' : ''}`}></span></button><button onClick={() => handleDeleteMeal(meal)} className="text-gray-300 hover:text-red-500"><Trash2 size={18} /></button></div></div>);})}</div>{showFrequencyModal && <FrequencyModal onClose={() => { setShowFrequencyModal(false); setPendingMealForFrequency(null); }} onSave={confirmToggleDaily} initialDays={pendingMealForFrequency?.ruleId ? dietRules.find(r => r.id === pendingMealForFrequency.ruleId)?.days : undefined} />}</div>
+                <div className="space-y-6 animate-fade-in pb-20 md:pb-0"><div className="bg-white dark:bg-dark-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700"><h3 className="font-bold text-gray-900 dark:text-white mb-4">Log Meal</h3><form onSubmit={handleAddMeal} className="flex flex-col gap-3"><input type="text" placeholder="Add Meal (e.g. Oats)" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" value={newMeal.name} onChange={e => setNewMeal({...newMeal, name: e.target.value})} /><div className="flex gap-2"><input type="number" placeholder="Cals" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={newMeal.calories} onChange={e => setNewMeal({...newMeal, calories: e.target.value})} /><input type="number" placeholder="Prot" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={newMeal.protein} onChange={e => setNewMeal({...newMeal, protein: e.target.value})} /><button className="bg-green-600 text-white px-4 rounded-xl font-bold"><Plus /></button></div></form></div><div className="space-y-3">{manualMeals.map(meal => (<div key={meal.id} className={`flex items-center justify-between p-3 bg-white dark:bg-dark-800 rounded-xl border border-gray-100 dark:border-gray-700 hover:shadow-sm transition hover:bg-gray-50 dark:hover:bg-gray-800/50 ${meal.completed ? 'opacity-50' : ''}`}><div className="flex items-center gap-3 overflow-hidden flex-1"><button onClick={() => updateMealDb(meal.id, { completed: !meal.completed })} className={`text-xl ${meal.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{meal.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button><div><p className={`font-medium text-gray-800 dark:text-white ${meal.completed ? 'line-through' : ''}`}>{meal.name}</p><p className="text-xs text-gray-500 dark:text-gray-400">{meal.calories} cal • {meal.protein}g prot</p></div></div><button onClick={() => removeMealDb(meal.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={18} /></button></div>))}</div></div>
             );
         }
 
