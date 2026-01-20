@@ -3,7 +3,8 @@ import {
   Activity, Home, CheckSquare, Dumbbell, Utensils, Plus, Trash2, Calendar, 
   CheckCircle, Circle, Flame, Droplet, Zap, ChevronLeft, ChevronRight, 
   Repeat, FileText, X, ArrowLeft, Minus, Moon, Sun, Settings, LogOut, 
-  Shield, Star, PlayCircle, HeartPulse, Target, BarChart2, Check, List as ListIcon
+  Shield, Star, PlayCircle, HeartPulse, Target, BarChart2, Check, List as ListIcon,
+  Twitter, Instagram, Linkedin, Github
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
@@ -162,6 +163,8 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, darkMode, setDarkMod
             <Activity size={32} />
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">LifeTrack</h1>
         </div>
+        
+        {/* Navigation - Pushed to top */}
         <nav className="flex-1 space-y-2">
             <SidebarLink active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<Home size={20} />} label="Overview" />
             <SidebarLink active={activeTab === 'todo'} onClick={() => setActiveTab('todo')} icon={<CheckSquare size={20} />} label="Tasks" />
@@ -169,8 +172,8 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, darkMode, setDarkMod
             <SidebarLink active={activeTab === 'diet'} onClick={() => setActiveTab('diet')} icon={<Utensils size={20} />} label="Nutrition" />
         </nav>
         
-        {/* Sidebar Footer Area */}
-        <div className="border-t border-slate-200 dark:border-slate-800 pt-4 space-y-2">
+        {/* Footer Actions - Pushed to bottom */}
+        <div className="mt-auto space-y-2 pt-4">
             <button 
                 onClick={() => setDarkMode(!darkMode)} 
                 className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800 transition"
@@ -185,9 +188,10 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, darkMode, setDarkMod
                 <Settings size={20} /> Settings
             </button>
 
-            {/* Separator Line added here */}
+            {/* Separator Line */}
             <div className="h-px bg-slate-200 dark:bg-slate-700 my-2 mx-2" />
 
+            {/* Profile Section */}
             <div className="flex items-center gap-3 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 mt-2 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition-all">
                 <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold shadow-sm">
                     {user.displayName ? user.displayName.charAt(0) : 'G'}
@@ -599,6 +603,15 @@ function TodoSection({ userId, selectedDate }) {
         showToast(`${tasks.length} Tasks Added!`);
     };
 
+    const getCategoryColor = (cat) => {
+        switch(cat) {
+            case 'Work': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300';
+            case 'Health': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300';
+            case 'Personal': return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300';
+            default: return 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300';
+        }
+    };
+
     return (
         <div className="space-y-6 animate-fade-in">
             <form onSubmit={handleAddTask} className="flex flex-col gap-3">
@@ -628,7 +641,7 @@ function TodoSection({ userId, selectedDate }) {
                                 <div className="flex flex-col overflow-hidden">
                                     <span className={`font-medium truncate ${task.completed ? 'line-through text-slate-400' : 'text-slate-800 dark:text-white'}`}>{task.text} {isRepeating && <Repeat size={12} className="inline ml-1 text-blue-400" />}</span>
                                     <div className="flex items-center gap-2 mt-1">
-                                        <span className="text-[10px] px-2 py-0.5 rounded-full w-fit bg-slate-100 text-slate-700">{task.category}</span>
+                                        <span className={`text-[10px] px-2 py-0.5 rounded-full w-fit ${getCategoryColor(task.category)}`}>{task.category}</span>
                                         {subtaskCount > 0 && <span className="text-[10px] px-2 py-0.5 rounded-full w-fit bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 flex items-center gap-1"><FileText size={10} /> {completedSubtasks}/{subtaskCount}</span>}
                                     </div>
                                 </div>
@@ -1114,7 +1127,7 @@ export default function App() {
     }
 
     // --- PRO DASHBOARD (LOGGED IN) ---
-    // (This part remains unchanged and uses the sections defined previously)
+
     return (
         <ToastProvider>
             <div className="h-full flex flex-col md:flex-row bg-slate-50 dark:bg-slate-900 transition-colors duration-300 min-h-screen">
