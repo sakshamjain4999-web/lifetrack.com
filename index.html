@@ -1,908 +1,1183 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>LifeTrack - Pro</title>
+import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
+import { 
+  Activity, Home, CheckSquare, Dumbbell, Utensils, Plus, Trash2, Calendar, 
+  CheckCircle, Circle, Flame, Droplet, Zap, ChevronLeft, ChevronRight, 
+  Repeat, FileText, X, ArrowLeft, Minus, Moon, Sun, Settings, LogOut, 
+  Shield, Star, PlayCircle, HeartPulse, Target, BarChart2, Check, List as ListIcon
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
+import { getFirestore, collection, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+
+// ---------------------------------------------------------
+// ⚠️ FIREBASE CONFIG & INIT
+// ---------------------------------------------------------
+let auth, db;
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+try {
+    if (typeof __firebase_config !== 'undefined') {
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        auth = getAuth(app);
+        db = getFirestore(app);
+    }
+} catch (e) {
+    console.error("Firebase init error (Guest mode will still work):", e);
+}
+
+// --- HELPERS ---
+const getTodayString = () => new Date().toISOString().split('T')[0];
+const isVirtualItem = (item) => typeof item.id === 'string' && item.id.startsWith('virtual_');
+const cleanData = (data) => { 
+    if (!data) return {};
+    const c = { ...data }; 
+    delete c.id; 
+    delete c.isVirtual; 
+    return c; 
+};
+
+// --- CONTEXT ---
+const ToastContext = createContext();
+
+function ToastProvider({ children }) {
+    const [toast, setToast] = useState(null);
+    const timerRef = useRef(null);
     
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    fontFamily: { sans: ['Inter', 'sans-serif'] },
-                    colors: {
-                        primary: { 50: '#eef2ff', 100: '#e0e7ff', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca', 900: '#312e81' },
-                        dark: { 800: '#1e293b', 900: '#0f172a' }
-                    },
-                    animation: {
-                        'slide-in': 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
-                        'fade-in': 'fadeIn 0.2s ease-out'
-                    },
-                    keyframes: {
-                        slideIn: { '0%': { transform: 'translateY(10px)', opacity: 0 }, '100%': { transform: 'translateY(0)', opacity: 1 } },
-                        fadeIn: { '0%': { opacity: 0 }, '100%': { opacity: 1 } }
+    const showToast = (message, type = 'success', action = null) => {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        setToast({ message, type, action });
+        timerRef.current = setTimeout(() => {
+            setToast(null);
+            timerRef.current = null;
+        }, 6000);
+    };
+
+    return (
+        <ToastContext.Provider value={{ showToast }}>
+            {children}
+            {toast && (
+                <div className={`fixed bottom-24 md:bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-xl shadow-2xl text-white text-sm font-medium z-[100] animate-bounce flex items-center gap-3 ${toast.type === 'error' ? 'bg-red-600' : 'bg-slate-900'}`}>
+                    <span>{toast.message}</span>
+                    {toast.action && (
+                        <button 
+                            onClick={() => { toast.action.onClick(); setToast(null); if (timerRef.current) clearTimeout(timerRef.current); }}
+                            className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded text-xs font-bold uppercase transition"
+                        >
+                            {toast.action.label}
+                        </button>
+                    )}
+                </div>
+            )}
+        </ToastContext.Provider>
+    );
+}
+
+// --- CUSTOM HOOK: HYBRID STORAGE (Local + Cloud) ---
+function useFirestore(userId, collectionName) {
+    const [data, setData] = useState([]);
+
+    useEffect(() => {
+        if (!userId) return;
+
+        if (userId === 'guest') {
+            const loadLocal = () => {
+                const saved = localStorage.getItem(`lifetrack_${collectionName}`);
+                setData(saved ? JSON.parse(saved) : []);
+            };
+            loadLocal();
+            const handleUpdate = (e) => { if (e.detail.col === collectionName) loadLocal(); };
+            window.addEventListener('lifetrack-update', handleUpdate);
+            return () => window.removeEventListener('lifetrack-update', handleUpdate);
+        }
+
+        if (db) {
+            const colRef = collection(db, 'artifacts', appId, 'users', userId, collectionName);
+            const unsubscribe = onSnapshot(colRef, (snapshot) => {
+                const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                setData(items);
+            }, err => console.error("Firestore Error:", err));
+            return unsubscribe;
+        }
+    }, [userId, collectionName]);
+
+    const add = async (item) => {
+        const itemToSave = cleanData({ ...item, createdAt: item.createdAt || new Date().toISOString() });
+        if (userId === 'guest') {
+            const newItem = { id: Date.now().toString(), ...itemToSave };
+            const currentLS = localStorage.getItem(`lifetrack_${collectionName}`);
+            const currentData = currentLS ? JSON.parse(currentLS) : [];
+            const newData = [...currentData, newItem];
+            localStorage.setItem(`lifetrack_${collectionName}`, JSON.stringify(newData));
+            setData(newData);
+            window.dispatchEvent(new CustomEvent('lifetrack-update', { detail: { col: collectionName } }));
+            return Promise.resolve({ id: newItem.id });
+        }
+        if (db) {
+            const colRef = collection(db, 'artifacts', appId, 'users', userId, collectionName);
+            return await addDoc(colRef, itemToSave);
+        }
+    };
+
+    const update = async (id, updates) => {
+        const updatesToSave = cleanData(updates);
+        if (userId === 'guest') {
+            const currentLS = localStorage.getItem(`lifetrack_${collectionName}`);
+            const currentData = currentLS ? JSON.parse(currentLS) : [];
+            const newData = currentData.map(i => i.id === id ? { ...i, ...updatesToSave } : i);
+            localStorage.setItem(`lifetrack_${collectionName}`, JSON.stringify(newData));
+            setData(newData);
+            window.dispatchEvent(new CustomEvent('lifetrack-update', { detail: { col: collectionName } }));
+            return Promise.resolve();
+        }
+        if (db) {
+            const docRef = doc(db, 'artifacts', appId, 'users', userId, collectionName, id);
+            return await updateDoc(docRef, updatesToSave);
+        }
+    };
+
+    const remove = async (id) => {
+        if (userId === 'guest') {
+            const currentLS = localStorage.getItem(`lifetrack_${collectionName}`);
+            const currentData = currentLS ? JSON.parse(currentLS) : [];
+            const newData = currentData.filter(i => i.id !== id);
+            localStorage.setItem(`lifetrack_${collectionName}`, JSON.stringify(newData));
+            setData(newData);
+            window.dispatchEvent(new CustomEvent('lifetrack-update', { detail: { col: collectionName } }));
+            return Promise.resolve();
+        }
+        if (db) {
+            const docRef = doc(db, 'artifacts', appId, 'users', userId, collectionName, id);
+            return await deleteDoc(docRef);
+        }
+    };
+    return { data, add, update, remove };
+}
+
+// --- SUB-COMPONENTS ---
+
+const Sidebar = ({ activeTab, setActiveTab, user, onLogout, darkMode, setDarkMode, setShowSettings }) => (
+    <aside className="hidden md:flex w-64 flex-col border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 h-full transition-colors">
+        <div className="flex items-center gap-2 text-blue-600 mb-8 px-2">
+            <Activity size={32} />
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">LifeTrack</h1>
+        </div>
+        <nav className="flex-1 space-y-2">
+            <SidebarLink active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<Home size={20} />} label="Overview" />
+            <SidebarLink active={activeTab === 'todo'} onClick={() => setActiveTab('todo')} icon={<CheckSquare size={20} />} label="Tasks" />
+            <SidebarLink active={activeTab === 'gym'} onClick={() => setActiveTab('gym')} icon={<Dumbbell size={20} />} label="Workout" />
+            <SidebarLink active={activeTab === 'diet'} onClick={() => setActiveTab('diet')} icon={<Utensils size={20} />} label="Nutrition" />
+        </nav>
+        
+        {/* Sidebar Footer Area */}
+        <div className="border-t border-slate-200 dark:border-slate-800 pt-4 space-y-2">
+            <button 
+                onClick={() => setDarkMode(!darkMode)} 
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800 transition"
+            >
+                {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+                {darkMode ? "Light Mode" : "Dark Mode"}
+            </button>
+            <button 
+                onClick={() => setShowSettings(true)}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800 transition"
+            >
+                <Settings size={20} /> Settings
+            </button>
+
+            {/* Separator Line added here */}
+            <div className="h-px bg-slate-200 dark:bg-slate-700 my-2 mx-2" />
+
+            <div className="flex items-center gap-3 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 mt-2 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition-all">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold shadow-sm">
+                    {user.displayName ? user.displayName.charAt(0) : 'G'}
+                </div>
+                <div className="flex-1 overflow-hidden">
+                    <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{user.displayName || 'Guest User'}</p>
+                    <p className="text-xs text-slate-500 truncate">Pro Plan</p>
+                </div>
+                <button onClick={onLogout} className="text-slate-400 hover:text-red-500 transition p-1 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"><LogOut size={18} /></button>
+            </div>
+        </div>
+    </aside>
+);
+
+const SidebarLink = ({ active, onClick, icon, label }) => (
+    <button 
+        onClick={onClick} 
+        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${active ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400' : 'text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'}`} 
+    >
+        {icon} {label}
+    </button>
+);
+
+const DateNavigator = ({ selectedDate, setSelectedDate }) => {
+    const changeDate = (days) => {
+        const date = new Date(selectedDate);
+        date.setDate(date.getDate() + days);
+        setSelectedDate(date.toISOString().split('T')[0]);
+    };
+    const isToday = selectedDate === getTodayString();
+    const displayDate = new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+
+    return (
+        <div className="flex items-center justify-between bg-white dark:bg-slate-800 p-3 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 mb-6">
+            <button onClick={() => changeDate(-1)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-600 dark:text-slate-300"><ChevronLeft size={20} /></button>
+            <div className="flex flex-col items-center">
+                <span className="text-sm font-bold text-slate-800 dark:text-white">{isToday ? "Today's Overview" : displayDate}</span>
+            </div>
+            <button onClick={() => changeDate(1)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-600 dark:text-slate-300"><ChevronRight size={20} /></button>
+        </div>
+    );
+};
+
+const WaterProgressCircle = ({ value, max, color, size = 100 }) => {
+    const radius = (size - 10) / 2;
+    const circumference = 2 * Math.PI * radius;
+    const percentage = Math.min(value / max, 1);
+    const offset = circumference - percentage * circumference;
+
+    return (
+        <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+            <svg width={size} height={size} className="transform -rotate-90">
+                <circle cx={size/2} cy={size/2} r={radius} stroke="#f3f4f6" strokeWidth="8" fill="transparent" className="dark:stroke-slate-700" />
+                <circle cx={size/2} cy={size/2} r={radius} stroke={color} strokeWidth="8" fill="transparent" strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-1000 ease-out" />
+            </svg>
+            <div className="absolute flex flex-col items-center">
+                <span className="text-xl font-bold text-slate-700 dark:text-white">{value}L</span>
+                <span className="text-[10px] text-slate-400">/ {max}L</span>
+            </div>
+        </div>
+    );
+};
+
+// --- MODALS ---
+
+function BulkAddModal({ onClose, onAdd, selectedDate }) {
+    const [text, setText] = useState('');
+
+    const handleAdd = () => {
+        const lines = text.split('\n').filter(line => line.trim() !== '');
+        if (lines.length === 0) return onClose();
+
+        const tasksToAdd = [];
+        const daysMap = { 'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3, 'thursday': 4, 'friday': 5, 'saturday': 6, 'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6 };
+
+        lines.forEach(line => {
+            let taskText = line;
+            let targetDate = selectedDate;
+            let category = 'General';
+
+            const parts = line.split(':');
+            if (parts.length > 1) {
+                const prefix = parts[0].trim().toLowerCase();
+                const content = parts.slice(1).join(':').trim();
+                if (content) { 
+                    if (prefix === 'tomorrow') {
+                        const dateObj = new Date(new Date(selectedDate).getTime() + (24 * 60 * 60 * 1000));
+                        targetDate = dateObj.toISOString().split('T')[0];
+                        taskText = content;
+                    } else if (prefix === 'today') {
+                        targetDate = selectedDate;
+                        taskText = content;
                     }
                 }
             }
-        }
-    </script>
+            tasksToAdd.push({ text: taskText, date: targetDate, category });
+        });
+
+        onAdd(tasksToAdd);
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 animate-fade-in backdrop-blur-sm">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md p-6 flex flex-col">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2"><ListIcon className="text-blue-600" /> Bulk Add Tasks</h3>
+                    <button onClick={onClose}><X size={24} className="text-slate-400" /></button>
+                </div>
+                <p className="text-xs text-slate-500 mb-2">Type each task on a new line. Prefixes: Tomorrow:, Today:</p>
+                <textarea className="flex-1 w-full p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white resize-none mb-4 font-mono text-sm h-40" placeholder="Buy milk&#10;Clean room&#10;Tomorrow: Submit report" value={text} onChange={(e) => setText(e.target.value)} autoFocus></textarea>
+                <button onClick={handleAdd} className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg hover:bg-blue-700 transition">Add All Tasks</button>
+            </div>
+        </div>
+    );
+}
+
+function FrequencyModal({ onClose, onSave, initialDays }) {
+    const [selectedDays, setSelectedDays] = useState(initialDays || [0,1,2,3,4,5,6]); 
+    const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+    const toggleDay = (index) => {
+        if (selectedDays.includes(index)) setSelectedDays(selectedDays.filter(d => d !== index));
+        else setSelectedDays([...selectedDays, index].sort());
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 animate-fade-in backdrop-blur-sm">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-xs p-6">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Repeat On</h3>
+                <div className="flex justify-between mb-4">
+                    {days.map((day, idx) => (
+                        <button key={idx} onClick={() => toggleDay(idx)} className={`w-8 h-8 rounded-full text-xs font-bold transition ${selectedDays.includes(idx) ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300'}`}>{day}</button>
+                    ))}
+                </div>
+                <div className="flex gap-2">
+                    <button onClick={onClose} className="flex-1 py-2 text-slate-500 dark:text-slate-400 font-medium">Cancel</button>
+                    <button onClick={() => onSave(selectedDays)} className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold">Save</button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function TaskDetailsPage({ task, onClose, onUpdate }) {
+    const [newSub, setNewSub] = useState('');
+    const [noteText, setNoteText] = useState(task.note || '');
+
+    const handleNoteChange = (e) => { setNoteText(e.target.value); onUpdate(task.id, { ...task, note: e.target.value }); };
+    const handleAddSub = (e) => { e.preventDefault(); if(!newSub.trim()) return; const updated = [...(task.subtasks || []), { id: Date.now(), text: newSub, completed: false }]; onUpdate(task.id, { ...task, subtasks: updated }); setNewSub(''); };
+    const toggleSub = (subId) => { const updated = task.subtasks.map(s => s.id === subId ? { ...s, completed: !s.completed } : s); onUpdate(task.id, { ...task, subtasks: updated }); };
+    const deleteSub = (subId) => { const updated = task.subtasks.filter(s => s.id !== subId); onUpdate(task.id, { ...task, subtasks: updated }); };
     
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    const total = task.subtasks ? task.subtasks.length : 0;
+    const completed = task.subtasks ? task.subtasks.filter(s => s.completed).length : 0;
 
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    return (
+        <div className="fixed inset-0 bg-white dark:bg-slate-900 z-50 flex flex-col md:relative md:inset-auto md:z-auto md:h-full md:border-l md:border-slate-200 md:dark:border-slate-700 md:w-96 md:bg-slate-50 md:dark:bg-slate-800">
+            <div className="bg-blue-600 p-4 text-white shadow-md flex items-center gap-3 md:rounded-t-xl">
+                <button onClick={onClose} className="p-1 hover:bg-blue-700 rounded"><ArrowLeft size={24} /></button>
+                <div className="flex-1"><h3 className="font-bold text-lg leading-tight truncate">{task.text}</h3></div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                <div>
+                    <div className="flex justify-between items-center mb-2">
+                        <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Checklist</h4>
+                        <span className="text-xs font-medium bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded text-slate-600 dark:text-slate-300">{completed}/{total} Done</span>
+                    </div>
+                    <form onSubmit={handleAddSub} className="flex gap-2 mb-3">
+                        <input type="text" value={newSub} onChange={e => setNewSub(e.target.value)} placeholder="Add subtask..." className="flex-1 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white transition-all" />
+                        <button className="bg-blue-600 text-white px-4 rounded-xl hover:bg-blue-700 font-bold text-xl flex items-center justify-center"><Plus size={24} /></button>
+                    </form>
+                    <div className="space-y-2">
+                        {task.subtasks?.map(sub => (
+                            <div key={sub.id} className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm transition-all">
+                                <div className="flex items-center gap-3 overflow-hidden flex-1">
+                                    <button onClick={() => toggleSub(sub.id)} className={`flex-shrink-0 text-xl transition-colors ${sub.completed ? 'text-green-500' : 'text-slate-300 dark:text-slate-600'}`}>{sub.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
+                                    <span className={`text-base font-medium truncate ${sub.completed ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-700 dark:text-slate-200'}`}>{sub.text}</span>
+                                </div>
+                                <button onClick={() => deleteSub(sub.id)} className="text-slate-300 hover:text-red-500 p-1"><Trash2 size={16} /></button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+                <div>
+                    <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Notes</h4>
+                    <textarea value={noteText} onChange={handleNoteChange} placeholder="Type notes here..." className="w-full h-40 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400 text-slate-700 dark:text-yellow-100 resize-none leading-relaxed" />
+                </div>
+            </div>
+        </div>
+    );
+}
 
-    <style>
-        html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
-        #root { height: 100%; display: flex; flex-direction: column; }
-        .scroll-container { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 100px; }
-        @media (min-width: 1024px) { .scroll-container { padding-bottom: 0; } }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        input[type="date"]::-webkit-calendar-picker-indicator { position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-        .gradient-text { background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        * { transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease; }
-    </style>
-</head>
-<body class="bg-gray-50 dark:bg-dark-900 text-gray-800 dark:text-gray-100 font-sans selection:bg-primary-500 selection:text-white">
-    <div id="root"></div>
+// --- SECTIONS ---
 
-    <script type="text/babel">
-        // ---------------------------------------------------------
-        // ⚠️ FIREBASE CONFIG
-        // ---------------------------------------------------------
-        const firebaseConfig = {
-            apiKey: "AIzaSyATZm-weR5EOxTHxE-5t_dqmpOgfuLb410",
-            authDomain: "lifetrack-app-1dca3.firebaseapp.com",
-            projectId: "lifetrack-app-1dca3",
-            storageBucket: "lifetrack-app-1dca3.firebasestorage.app",
-            messagingSenderId: "37874669128",
-            appId: "1:37874669128:web:8615acae9a11195fb72a7d"
-        };
+function DashboardSection({ userId, selectedDate, goals }) {
+    const { data: diet } = useFirestore(userId, 'diet');
+    const { data: todos } = useFirestore(userId, 'todos');
+    const { data: water } = useFirestore(userId, 'water');
+    const { data: gym } = useFirestore(userId, 'gym');
+    
+    const todaysMeals = diet.filter(m => m.date === selectedDate && m.completed);
+    const calCurrent = todaysMeals.reduce((acc, curr) => acc + Number(curr.calories), 0);
+    const protCurrent = todaysMeals.reduce((acc, curr) => acc + Number(curr.protein), 0);
+    const waterLog = water.find(w => w.date === selectedDate);
+    const waterCurrent = waterLog ? waterLog.amount : 0;
+    const todaysTasks = todos.filter(t => t.date === selectedDate);
+    const tasksDone = todaysTasks.filter(t => t.completed).length;
+    const tasksTotal = todaysTasks.length;
+    const gymDone = gym.some(w => w.date === selectedDate);
 
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.firestore();
+    const calPct = goals.calories ? Math.round((calCurrent/goals.calories)*100) : 0;
+    const taskPct = tasksTotal ? Math.round((tasksDone/tasksTotal)*100) : 0;
 
-        const { useState, useEffect, createContext, useContext, useRef } = React;
+    const updateWater = (amount) => {
+        // Dashboard view only
+    };
 
-        // --- HELPERS ---
-        const getTodayString = () => new Date().toISOString().split('T')[0];
-        const isVirtualItem = (item) => typeof item.id === 'string' && item.id.startsWith('virtual_');
-        const cleanData = (data) => { 
-            if (!data) return {};
-            const c = { ...data }; 
-            delete c.id; 
-            delete c.isVirtual; 
-            return c; 
-        };
+    return (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-fade-in">
+            <div className="col-span-1 md:col-span-2 lg:col-span-4 bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-8 text-white shadow-xl">
+                <h2 className="text-3xl font-bold mb-2">Hello, {userId === 'guest' ? 'Guest' : 'Chief'}! 👋</h2>
+                <p className="text-indigo-100 mb-6">Here is your summary for today.</p>
+                <div className="flex gap-16">
+                    <div>
+                        <div className="text-4xl font-bold">{calPct}%</div>
+                        <div className="text-xs uppercase opacity-70 tracking-wider">Diet Goal</div>
+                    </div>
+                    <div className="border-l border-indigo-500/30 pl-16">
+                        <div className="text-4xl font-bold">{taskPct}%</div>
+                        <div className="text-xs uppercase opacity-70 tracking-wider">Tasks Done</div>
+                    </div>
+                </div>
+            </div>
 
-        // --- ICONS ---
-        const Icon = ({ children, size = 24, className = "" }) => (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>);
-        const Home = (p) => <Icon {...p}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></Icon>;
-        const Activity = (p) => <Icon {...p}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></Icon>;
-        const CheckSquare = (p) => <Icon {...p}><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></Icon>;
-        const Dumbbell = (p) => <Icon {...p}><path d="m6.5 6.5 11 11"/><path d="m21 21-1-1"/><path d="m3 3 1 1"/><path d="m18 22 4-4"/><path d="m2 6 4-4"/><path d="m3 10 7-7"/><path d="m14 21 7-7"/></Icon>;
-        const Utensils = (p) => <Icon {...p}><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></Icon>;
-        const Plus = (p) => <Icon {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></Icon>;
-        const Trash2 = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></Icon>;
-        const CalendarIcon = (p) => <Icon {...p}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></Icon>;
-        const CheckCircle = (p) => <Icon {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></Icon>;
-        const Circle = (p) => <Icon {...p}><circle cx="12" cy="12" r="10"/></Icon>;
-        const Flame = (p) => <Icon {...p}><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.1.2-2.2.5-3.3.3-1.1 1-3.3 3-5.2"/></Icon>;
-        const Droplet = (p) => <Icon {...p}><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></Icon>;
-        const Zap = (p) => <Icon {...p}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></Icon>;
-        const ChevronLeft = (p) => <Icon {...p}><polyline points="15 18 9 12 15 6"/></Icon>;
-        const ChevronRight = (p) => <Icon {...p}><polyline points="9 18 15 12 9 6"/></Icon>;
-        const Repeat = (p) => <Icon {...p}><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></Icon>;
-        const FileText = (p) => <Icon {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></Icon>;
-        const XIcon = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></Icon>;
-        const ArrowLeft = (p) => <Icon {...p}><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></Icon>;
-        const Minus = (p) => <Icon {...p}><line x1="5" y1="12" x2="19" y2="12"/></Icon>;
-        const Moon = (p) => <Icon {...p}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></Icon>;
-        const Sun = (p) => <Icon {...p}><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></Icon>;
-        const Settings = (p) => <Icon {...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></Icon>;
-        const GoogleIcon = () => <svg viewBox="0 0 48 48" width="24" height="24"><path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/><path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/><path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/><path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/></svg>;
-        const GuestIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
-        const ListIcon = (p) => <Icon {...p}><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></Icon>;
-        const Logout = (p) => <Icon {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></Icon>;
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm">
+                <div className="flex items-center gap-2 text-blue-500 mb-4 font-bold text-sm"><CheckSquare size={20} /> Tasks</div>
+                <div className="text-3xl font-bold text-slate-900 dark:text-white">{tasksDone} <span className="text-slate-400 text-lg">/ {tasksTotal}</span></div>
+                <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full mt-4"><div className="bg-blue-500 h-full rounded-full transition-all duration-1000" style={{ width: `${tasksTotal ? (tasksDone/tasksTotal)*100 : 0}%` }}></div></div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm flex flex-col justify-between">
+                <div>
+                    <div className="flex justify-between mb-2"><div className="flex items-center gap-1 text-orange-500 font-bold text-sm"><Flame size={16} /> Calories</div><span className="text-xs text-slate-500">{calCurrent}/{goals.calories}</span></div>
+                    <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full mb-4"><div className="bg-orange-500 h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min((calCurrent/goals.calories)*100, 100)}%` }}></div></div>
+                    
+                    <div className="flex justify-between mb-2"><div className="flex items-center gap-1 text-blue-500 font-bold text-sm"><Zap size={16} /> Protein</div><span className="text-xs text-slate-500">{protCurrent}g/{goals.protein}g</span></div>
+                    <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full mb-4"><div className="bg-blue-500 h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min((protCurrent/goals.protein)*100, 100)}%` }}></div></div>
+                </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm flex items-center justify-between">
+                <div>
+                    <div className="flex items-center gap-2 text-cyan-500 font-bold text-sm mb-2"><Droplet size={20} /> Water</div>
+                    <div className="text-3xl font-bold text-slate-900 dark:text-white">{waterCurrent}L</div>
+                </div>
+                <WaterProgressCircle value={waterCurrent} max={goals.water} color="#06b6d4" size={80} />
+            </div>
+
+            {/* Gym Summary Card */}
+            <div className={`p-6 rounded-2xl border shadow-sm flex flex-col justify-center items-center gap-2 transition ${gymDone ? 'bg-green-50 border-green-100 dark:bg-green-900/20 dark:border-green-900' : 'bg-white border-slate-100 dark:bg-slate-800 dark:border-slate-700'}`}>
+                <div className={`p-3 rounded-full ${gymDone ? 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300' : 'bg-slate-100 text-slate-400 dark:bg-slate-700'}`}>
+                    <Dumbbell size={32} />
+                </div>
+                <div className={`text-lg font-bold ${gymDone ? 'text-green-700 dark:text-green-400' : 'text-slate-500'}`}>
+                    {gymDone ? 'Workout Done!' : 'No Workout'}
+                </div>
+                {!gymDone && <p className="text-xs text-slate-400">Go lift something heavy!</p>}
+            </div>
+        </div>
+    );
+}
+
+function TodoSection({ userId, selectedDate }) {
+    const { showToast } = useContext(ToastContext);
+    const { data: tasks, add: addTaskToDb, update: updateTaskInDb, remove: removeTaskFromDb } = useFirestore(userId, 'todos');
+    const { data: dailyRules, add: addRule, update: updateRule } = useFirestore(userId, 'dailyRules');
+    const { data: deletedInstances, add: addDeletedInstance, remove: removeDeletedInstance } = useFirestore(userId, 'deletedInstances');
+    
+    const [localTasks, setLocalTasks] = useState([]);
+    const [newTask, setNewTask] = useState('');
+    const [activeTaskForDetails, setActiveTaskForDetails] = useState(null);
+    const [category, setCategory] = useState('General');
+    const [showFrequencyModal, setShowFrequencyModal] = useState(false);
+    const [pendingTaskForFrequency, setPendingTaskForFrequency] = useState(null);
+    const [showBulkAdd, setShowBulkAdd] = useState(false);
+
+    useEffect(() => {
+        const manualTasks = tasks.filter(t => t.date === selectedDate);
+        const generatedTasks = [];
+        const dayOfWeek = new Date(selectedDate).getDay();
+
+        dailyRules.forEach(rule => {
+            const isStarted = rule.startDate <= selectedDate;
+            const isNotEnded = rule.endDate === null || rule.endDate >= selectedDate;
+            const isCorrectDay = !rule.days || rule.days.includes(dayOfWeek);
+
+            if (isStarted && isNotEnded && isCorrectDay) {
+                const deletedDoc = deletedInstances.find(d => d.ruleId === rule.id && d.date === selectedDate);
+                const exists = tasks.some(t => t.ruleId === rule.id && t.date === selectedDate);
+                
+                if (!deletedDoc && !exists) {
+                    const derivedTime = isNaN(Number(rule.id)) ? '0' : new Date(Number(rule.id)).toISOString();
+                    generatedTasks.push({ id: `virtual_${rule.id}_${selectedDate}`, text: rule.text, category: rule.category, completed: false, date: selectedDate, ruleId: rule.id, subtasks: [], note: "", isVirtual: true, createdAt: derivedTime });
+                }
+            }
+        });
+
+        const combined = [...manualTasks, ...generatedTasks];
+        combined.sort((a, b) => {
+            const dateA = a.createdAt || ''; 
+            const dateB = b.createdAt || '';
+            if (dateB < dateA) return -1;
+            if (dateB > dateA) return 1;
+            return 0;
+        });
         
-        // --- ADDED MISSING ICONS ---
-        const BarChart2 = (p) => <Icon {...p}><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></Icon>;
-        const HeartPulse = (p) => <Icon {...p}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></Icon>;
-        const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></Icon>;
-        const Check = (p) => <Icon {...p}><polyline points="20 6 9 17 4 12"/></Icon>;
-        const Shield = (p) => <Icon {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></Icon>;
+        setLocalTasks(combined);
+    }, [tasks, dailyRules, deletedInstances, selectedDate]);
 
-        // --- CONTEXT ---
-        const ToastContext = createContext();
-        function ToastProvider({ children }) {
-            const [toast, setToast] = useState(null);
-            const timerRef = useRef(null);
-            
-            const showToast = (message, type = 'success', action = null) => {
-                if (timerRef.current) clearTimeout(timerRef.current);
-                setToast({ message, type, action });
-                timerRef.current = setTimeout(() => {
-                    setToast(null);
-                    timerRef.current = null;
-                }, 6000);
-            };
+    const handleAddTask = (e) => { 
+        e.preventDefault(); 
+        if(!newTask.trim()) return; 
+        addTaskToDb({ 
+            text: newTask, 
+            category: category, 
+            completed: false, 
+            date: selectedDate, 
+            subtasks: [], 
+            note: "" 
+        }); 
+        setNewTask(''); 
+        showToast('Task Added'); 
+    };
 
-            return (
-                <ToastContext.Provider value={{ showToast }}>
-                    {children}
-                    {toast && (
-                        <div className={`fixed bottom-24 left-1/2 transform -translate-x-1/2 px-4 py-3 rounded-xl shadow-lg text-white text-sm font-medium z-50 animate-bounce flex items-center gap-3 ${toast.type === 'error' ? 'bg-red-500' : 'bg-gray-800'}`}>
-                            <span>{toast.message}</span>
-                            {toast.action && (
-                                <button 
-                                    onClick={() => {
-                                        toast.action.onClick();
-                                        setToast(null);
-                                        if (timerRef.current) clearTimeout(timerRef.current);
-                                    }}
-                                    className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded text-xs font-bold uppercase transition"
-                                >
-                                    {toast.action.label}
-                                </button>
-                            )}
+    const handleToggleTask = (task) => { if (isVirtualItem(task)) { addTaskToDb({ text: task.text, category: task.category, date: selectedDate, ruleId: task.ruleId, subtasks: [], note: "", completed: !task.completed }); } else { updateTaskInDb(task.id, { completed: !task.completed }); } };
+    
+    const handleDeleteTask = (task) => { 
+        if (isVirtualItem(task)) { 
+            addDeletedInstance({ ruleId: task.ruleId, date: selectedDate }).then((ref) => {
+                showToast('Task Deleted', 'default', {
+                    label: 'UNDO',
+                    onClick: () => removeDeletedInstance(ref.id)
+                });
+            });
+        } else { 
+            const taskData = { ...task };
+            const cleanTaskData = cleanData(taskData);
+            removeTaskFromDb(task.id);
+            if (task.ruleId) { 
+                addDeletedInstance({ ruleId: task.ruleId, date: selectedDate }).then((ref) => {
+                     showToast('Task Deleted', 'default', { label: 'UNDO', onClick: () => { removeDeletedInstance(ref.id); } });
+                });
+            } else {
+                showToast('Task Deleted', 'default', {
+                    label: 'UNDO',
+                    onClick: () => addTaskToDb(cleanTaskData)
+                });
+            }
+        } 
+    };
+
+    const handleUpdateDetails = (taskId, updatedData) => { 
+        const task = localTasks.find(t => t.id === taskId);
+        if (isVirtualItem(task)) { addTaskToDb({ text: task.text, category: task.category, date: selectedDate, ruleId: task.ruleId, subtasks: updatedData.subtasks, note: updatedData.note, completed: task.completed }); setActiveTaskForDetails(null); }
+        else { updateTaskInDb(taskId, { subtasks: updatedData.subtasks, note: updatedData.note }); if (activeTaskForDetails && activeTaskForDetails.id === taskId) setActiveTaskForDetails(updatedData); }
+    };
+
+    const initiateToggleDaily = (task) => {
+        const rule = dailyRules.find(r => r.id === task.ruleId);
+        const isRepeating = rule && (rule.endDate === null || rule.endDate > selectedDate);
+        
+        if (isRepeating) {
+            if(rule) updateRule(rule.id, { endDate: selectedDate });
+            showToast('Recurring Disabled');
+        } else {
+            setPendingTaskForFrequency(task);
+            setShowFrequencyModal(true);
+        }
+    };
+
+    const confirmToggleDaily = (days) => {
+        const task = pendingTaskForFrequency;
+        const rule = dailyRules.find(r => r.id === task.ruleId);
+        if (rule) {
+            updateRule(rule.id, { endDate: null, days: days });
+        } else {
+            addRule({ text: task.text, category: task.category, startDate: selectedDate, endDate: null, days: days })
+                .then(docRef => updateTaskInDb(task.id, { ruleId: docRef.id }));
+        }
+        setShowFrequencyModal(false);
+        setPendingTaskForFrequency(null);
+        showToast('Recurring Enabled');
+    };
+
+    const handleBulkAdd = (tasks) => {
+        tasks.forEach(t => {
+            setTimeout(() => {
+                addTaskToDb({
+                    text: t.text,
+                    category: t.category,
+                    completed: false,
+                    date: t.date,
+                    subtasks: [],
+                    note: ""
+                });
+            }, 50);
+        });
+        showToast(`${tasks.length} Tasks Added!`);
+    };
+
+    return (
+        <div className="space-y-6 animate-fade-in">
+            <form onSubmit={handleAddTask} className="flex flex-col gap-3">
+                <input type="text" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a new task..." className="w-full p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white shadow-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                <div className="flex gap-2">
+                    <button type="button" onClick={() => setShowBulkAdd(true)} className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"><ListIcon size={24} /></button>
+                    <select value={category} onChange={(e) => setCategory(e.target.value)} className="flex-1 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 dark:text-white text-sm focus:outline-none">
+                        <option value="General">General</option>
+                        <option value="Work">Work</option>
+                        <option value="Health">Health</option>
+                        <option value="Personal">Personal</option>
+                    </select>
+                    <button className="bg-blue-600 text-white px-6 rounded-xl font-bold shadow-md hover:bg-blue-700 transition flex items-center gap-2"><Plus size={20} /> Add</button>
+                </div>
+            </form>
+
+            <div className="space-y-3 pb-24 md:pb-0">
+                {localTasks.map(task => {
+                    const activeRule = dailyRules.find(r => r.id === task.ruleId);
+                    const isRepeating = activeRule && (activeRule.endDate === null || activeRule.endDate > selectedDate);
+                    const subtaskCount = task.subtasks ? task.subtasks.length : 0;
+                    const completedSubtasks = task.subtasks ? task.subtasks.filter(s => s.completed).length : 0;
+                    return (
+                        <div key={task.id} className={`flex items-center justify-between p-4 bg-white dark:bg-slate-800 rounded-xl shadow-sm border-l-4 transition-all ${task.completed ? 'border-green-500 opacity-60' : 'border-blue-500'}`}>
+                            <div className="flex items-center gap-3 overflow-hidden flex-1">
+                                <button onClick={() => handleToggleTask(task)} className={`text-xl ${task.completed ? 'text-green-500' : 'text-slate-300 dark:text-slate-600'}`}>{task.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
+                                <div className="flex flex-col overflow-hidden">
+                                    <span className={`font-medium truncate ${task.completed ? 'line-through text-slate-400' : 'text-slate-800 dark:text-white'}`}>{task.text} {isRepeating && <Repeat size={12} className="inline ml-1 text-blue-400" />}</span>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full w-fit bg-slate-100 text-slate-700">{task.category}</span>
+                                        {subtaskCount > 0 && <span className="text-[10px] px-2 py-0.5 rounded-full w-fit bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 flex items-center gap-1"><FileText size={10} /> {completedSubtasks}/{subtaskCount}</span>}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3 ml-2">
+                                <button onClick={() => setActiveTaskForDetails(task)} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-lg text-slate-500 dark:text-slate-300"><FileText size={18} /></button>
+                                <button onClick={() => initiateToggleDaily(task)} className={`w-8 h-5 rounded-full relative transition-colors ${isRepeating ? 'bg-blue-600' : 'bg-slate-200 dark:bg-slate-700'}`}><span className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full transition-transform ${isRepeating ? 'translate-x-3' : ''}`}></span></button>
+                                <button onClick={() => handleDeleteTask(task)} className="text-slate-300 hover:text-red-500"><Trash2 size={18} /></button>
+                            </div>
                         </div>
-                    )}
-                </ToastContext.Provider>
-            );
-        }
+                    );
+                })}
+            </div>
+            {activeTaskForDetails && <TaskDetailsPage task={activeTaskForDetails} onClose={() => setActiveTaskForDetails(null)} onUpdate={handleUpdateDetails} />}
+            {showFrequencyModal && <FrequencyModal onClose={() => { setShowFrequencyModal(false); setPendingTaskForFrequency(null); }} onSave={confirmToggleDaily} initialDays={pendingTaskForFrequency?.ruleId ? dailyRules.find(r => r.id === pendingTaskForFrequency.ruleId)?.days : undefined} />}
+            {showBulkAdd && <BulkAddModal onClose={() => setShowBulkAdd(false)} onAdd={handleBulkAdd} selectedDate={selectedDate} />}
+        </div>
+    );
+}
 
-        // --- SHARED HOOK ---
-        function useFirestore(userId, collectionName) {
-            const [data, setData] = useState([]);
+function GymSection({ userId, selectedDate }) {
+    const { data: workouts, add: addWorkout, remove: deleteWorkout } = useFirestore(userId, 'gym');
+    const [entry, setEntry] = useState({ exercise: '', sets: '', reps: '', weight: '' });
+    const { showToast } = useContext(ToastContext);
 
-            useEffect(() => {
-                if (!userId) return;
+    const addSet = (e) => {
+        e.preventDefault(); if (!entry.exercise) return;
+        addWorkout({ ...entry, date: selectedDate });
+        setEntry({ ...entry, sets: '', reps: '', weight: '' });
+        showToast('Set Logged');
+    };
 
-                if (userId === 'guest') {
-                    const loadLocal = () => {
-                        const saved = localStorage.getItem(`lifetrack_${collectionName}`);
-                        setData(saved ? JSON.parse(saved) : []);
-                    };
-                    loadLocal();
-                    const handleUpdate = (e) => { if (e.detail.col === collectionName) loadLocal(); };
-                    window.addEventListener('lifetrack-update', handleUpdate);
-                    return () => window.removeEventListener('lifetrack-update', handleUpdate);
-                }
+    const handleDeleteWorkout = (id) => {
+         const workoutToRestore = workouts.find(w => w.id === id);
+         const { id: _, ...data } = workoutToRestore; 
+         const cleanWorkoutData = cleanData(data);
+         deleteWorkout(id);
+         showToast('Workout Deleted', 'default', { label: 'UNDO', onClick: () => addWorkout(cleanWorkoutData) });
+    };
 
-                const unsubscribe = db.collection('users').doc(userId).collection(collectionName)
-                    .onSnapshot(snapshot => {
-                        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        setData(items);
-                    }, err => {
-                        console.error("Firestore Error:", err);
-                    });
-                return unsubscribe;
-            }, [userId, collectionName]);
+    const todaysWorkouts = workouts.filter(w => w.date === selectedDate);
+    todaysWorkouts.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
-            const add = (item) => {
-                const itemToSave = cleanData({ ...item, createdAt: item.createdAt || new Date().toISOString() });
-                if (userId === 'guest') {
-                    const newItem = { id: Date.now().toString(), ...itemToSave };
-                    const currentLS = localStorage.getItem(`lifetrack_${collectionName}`);
-                    const currentData = currentLS ? JSON.parse(currentLS) : [];
-                    const newData = [...currentData, newItem];
-                    localStorage.setItem(`lifetrack_${collectionName}`, JSON.stringify(newData));
-                    setData(newData);
-                    window.dispatchEvent(new CustomEvent('lifetrack-update', { detail: { col: collectionName } }));
-                    return Promise.resolve({ id: newItem.id });
-                }
-                return db.collection('users').doc(userId).collection(collectionName).add(itemToSave)
-                    .catch(err => { alert("Error adding data: " + err.message); throw err; });
-            };
-
-            const update = (id, updates) => {
-                const updatesToSave = cleanData(updates);
-                if (userId === 'guest') {
-                    const currentLS = localStorage.getItem(`lifetrack_${collectionName}`);
-                    const currentData = currentLS ? JSON.parse(currentLS) : [];
-                    const newData = currentData.map(i => i.id === id ? { ...i, ...updatesToSave } : i);
-                    localStorage.setItem(`lifetrack_${collectionName}`, JSON.stringify(newData));
-                    setData(newData);
-                    window.dispatchEvent(new CustomEvent('lifetrack-update', { detail: { col: collectionName } }));
-                    return Promise.resolve();
-                }
-                return db.collection('users').doc(userId).collection(collectionName).doc(id).update(updatesToSave)
-                    .catch(err => { alert("Error updating data: " + err.message); throw err; });
-            };
-
-            const remove = (id) => {
-                if (userId === 'guest') {
-                    const currentLS = localStorage.getItem(`lifetrack_${collectionName}`);
-                    const currentData = currentLS ? JSON.parse(currentLS) : [];
-                    const newData = currentData.filter(i => i.id !== id);
-                    localStorage.setItem(`lifetrack_${collectionName}`, JSON.stringify(newData));
-                    setData(newData);
-                    window.dispatchEvent(new CustomEvent('lifetrack-update', { detail: { col: collectionName } }));
-                    return Promise.resolve();
-                }
-                return db.collection('users').doc(userId).collection(collectionName).doc(id).delete()
-                    .catch(err => { alert("Error deleting data: " + err.message); throw err; });
-            };
-            return { data, add, update, remove };
-        }
-
-        // --- BULK ADD MODAL ---
-        function BulkAddModal({ onClose, onAdd, selectedDate }) {
-            const [text, setText] = useState('');
-            const handleAdd = () => {
-                const lines = text.split('\n').filter(line => line.trim() !== '');
-                if (lines.length === 0) return onClose();
-                const tasksToAdd = [];
-                lines.forEach(line => tasksToAdd.push({ text: line, date: selectedDate, category: 'General' }));
-                onAdd(tasksToAdd);
-                onClose();
-            };
-            return (
-                <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 animate-fade-in backdrop-blur-sm">
-                    <div className="bg-white dark:bg-dark-800 rounded-2xl shadow-xl w-full max-w-md p-6">
-                        <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2"><ListIcon className="text-primary-600"/> Bulk Add Tasks</h3><button onClick={onClose}><X size={24} className="text-gray-400" /></button></div>
-                        <textarea className="w-full p-4 bg-gray-50 dark:bg-dark-900 border border-gray-200 dark:border-gray-700 rounded-xl mb-4 text-sm" placeholder="Enter tasks..." value={text} onChange={(e) => setText(e.target.value)} autoFocus></textarea>
-                        <button onClick={handleAdd} className="w-full py-3 bg-primary-600 text-white rounded-xl font-bold">Add All Tasks</button>
+    return (
+        <div className="space-y-6 animate-fade-in">
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
+                <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-900 dark:text-white"><Dumbbell className="text-blue-600" size={24} /> Log Workout</h2>
+                <form onSubmit={addSet} className="space-y-4">
+                    <input type="text" placeholder="Exercise Name" className="w-full p-3 rounded-xl border dark:border-slate-600 bg-slate-50 dark:bg-slate-900 dark:text-white" value={entry.exercise} onChange={e => setEntry({...entry, exercise: e.target.value})} />
+                    <div className="grid grid-cols-3 gap-3">
+                        <input type="number" placeholder="kg" className="w-full p-3 rounded-xl border dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-center dark:text-white" value={entry.weight} onChange={e => setEntry({...entry, weight: e.target.value})} />
+                        <input type="number" placeholder="Sets" className="w-full p-3 rounded-xl border dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-center dark:text-white" value={entry.sets} onChange={e => setEntry({...entry, sets: e.target.value})} />
+                        <input type="number" placeholder="Reps" className="w-full p-3 rounded-xl border dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-center dark:text-white" value={entry.reps} onChange={e => setEntry({...entry, reps: e.target.value})} />
                     </div>
-                </div>
-            );
-        }
-
-        function FrequencyModal({ onClose, onSave, initialDays }) {
-            const [selectedDays, setSelectedDays] = useState(initialDays || [0,1,2,3,4,5,6]); 
-            const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-            const toggleDay = (idx) => setSelectedDays(prev => prev.includes(idx) ? prev.filter(d => d !== idx) : [...prev, idx].sort());
-            const toggleAll = () => setSelectedDays(selectedDays.length === 7 ? [] : [0,1,2,3,4,5,6]);
-            return (
-                <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div className="bg-white dark:bg-dark-800 rounded-2xl shadow-xl w-full max-w-xs p-6">
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Repeat On</h3>
-                        <div className="flex justify-between mb-6">{days.map((d, i) => <button key={i} onClick={() => toggleDay(i)} className={`w-8 h-8 rounded-full text-xs font-bold ${selectedDays.includes(i) ? 'bg-primary-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500'}`}>{d}</button>)}</div>
-                        <button onClick={toggleAll} className="w-full py-2 text-primary-600 dark:text-primary-400 text-sm font-medium mb-4">{selectedDays.length === 7 ? 'Deselect All' : 'Select Everyday'}</button>
-                        <div className="flex gap-2"><button onClick={onClose} className="flex-1 py-2 text-gray-500">Cancel</button><button onClick={() => onSave(selectedDays)} className="flex-1 py-2 bg-primary-600 text-white rounded-lg font-bold">Save</button></div>
+                    <button className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-3 rounded-xl font-bold shadow-md hover:opacity-90">Log Set</button>
+                </form>
+            </div>
+            
+            <div className="space-y-3 pb-20 md:pb-0">
+                {todaysWorkouts.length === 0 && <div className="text-center text-slate-400 py-12 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700">No workouts logged today. Get moving!</div>}
+                {todaysWorkouts.map((w) => (
+                    <div key={w.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 flex justify-between items-center hover:shadow-md transition">
+                        <div><p className="font-bold text-slate-800 dark:text-white">{w.exercise}</p><p className="text-sm text-slate-500 dark:text-slate-400">{w.weight}kg × {w.sets} sets × {w.reps} reps</p></div>
+                        <button onClick={() => handleDeleteWorkout(w.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={18} /></button>
                     </div>
-                </div>
-            );
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function DietSection({ userId, selectedDate, goals }) {
+    const { data: meals, add: addMealDb, update: updateMealDb, remove: removeMealDb } = useFirestore(userId, 'diet');
+    const { data: dietRules, add: addDietRule, update: updateDietRule } = useFirestore(userId, 'dietRules');
+    const { data: deletedDietInstances, add: addDeletedDiet, remove: removeDeletedDiet } = useFirestore(userId, 'deletedDiet');
+    const { data: waterLogs, add: addWaterLog, update: updateWaterLog } = useFirestore(userId, 'water');
+    const [localMeals, setLocalMeals] = useState([]);
+    const [newMeal, setNewMeal] = useState({ name: '', calories: '', protein: '' });
+    const { showToast } = useContext(ToastContext);
+    const [mounted, setMounted] = useState(false);
+    const [showFrequencyModal, setShowFrequencyModal] = useState(false);
+    const [pendingMealForFrequency, setPendingMealForFrequency] = useState(null);
+
+    useEffect(() => { setTimeout(() => setMounted(true), 50); }, []);
+
+    useEffect(() => {
+        const manualMeals = meals.filter(m => m.date === selectedDate);
+        const generatedMeals = [];
+        const dayOfWeek = new Date(selectedDate).getDay();
+
+        dietRules.forEach(rule => {
+            const isStarted = rule.startDate <= selectedDate;
+            const isNotEnded = rule.endDate === null || rule.endDate >= selectedDate;
+            const isCorrectDay = !rule.days || rule.days.includes(dayOfWeek);
+
+            if (isStarted && isNotEnded && isCorrectDay) {
+                const isDeleted = deletedDietInstances.some(d => d.ruleId === rule.id && d.date === selectedDate);
+                const exists = meals.some(m => m.ruleId === rule.id && m.date === selectedDate);
+                if (!isDeleted && !exists) {
+                    const derivedTime = isNaN(Number(rule.id)) ? '0' : new Date(Number(rule.id)).toISOString();
+                    generatedMeals.push({ id: `virtual_${rule.id}_${selectedDate}`, date: selectedDate, name: rule.name, calories: rule.calories, protein: rule.protein, completed: false, ruleId: rule.id, isVirtual: true, createdAt: derivedTime });
+                }
+            }
+        });
+        
+        const combined = [...manualMeals, ...generatedMeals];
+        combined.sort((a, b) => {
+            const dateA = a.createdAt || ''; 
+            const dateB = b.createdAt || '';
+            if (dateB < dateA) return -1;
+            if (dateB > dateA) return 1;
+            return 0;
+        });
+        setLocalMeals(combined);
+    }, [meals, dietRules, deletedDietInstances, selectedDate]);
+
+    const todayWaterLog = waterLogs.find(w => w.date === selectedDate);
+    const currentWater = todayWaterLog ? todayWaterLog.amount : 0;
+    const updateWater = (amount) => { if (todayWaterLog) { updateWaterLog(todayWaterLog.id, { amount }); } else { addWaterLog({ date: selectedDate, amount }); } };
+    const handleAddMeal = (e) => { e.preventDefault(); if (!newMeal.name) return; addMealDb({ ...newMeal, date: selectedDate, completed: false }); setNewMeal({ name: '', calories: '', protein: '' }); showToast('Meal Added'); };
+    const handleToggleMeal = (meal) => { if (isVirtualItem(meal)) { addMealDb({ ...meal, isVirtual: false, completed: !meal.completed }); } else { updateMealDb(meal.id, { completed: !meal.completed }); } };
+    
+    const handleDeleteMeal = (meal) => { 
+        if (isVirtualItem(meal)) { 
+            addDeletedDiet({ ruleId: meal.ruleId, date: selectedDate }).then((ref) => {
+                showToast('Meal Deleted', 'default', { label: 'UNDO', onClick: () => removeDeletedDiet(ref.id) });
+            });
+        } else { 
+            const mealData = { ...meal };
+            const cleanMealData = cleanData(mealData);
+            removeMealDb(meal.id);
+            if (meal.ruleId) {
+                 addDeletedDiet({ ruleId: meal.ruleId, date: selectedDate }).then((ref) => {
+                     showToast('Meal Deleted', 'default', { label: 'UNDO', onClick: () => { removeDeletedDiet(ref.id); } });
+                 });
+            } else {
+                 showToast('Meal Deleted', 'default', { label: 'UNDO', onClick: () => addMealDb(cleanMealData) });
+            }
+        } 
+    };
+
+    const initiateToggleDaily = (meal) => {
+        const rule = dietRules.find(r => r.id === meal.ruleId);
+        const isRepeating = rule && (rule.endDate === null || rule.endDate > selectedDate);
+        
+        if (isRepeating) {
+            if(rule) updateDietRule(rule.id, { endDate: selectedDate });
+            showToast('Recurring Disabled');
+        } else {
+            setPendingMealForFrequency(meal);
+            setShowFrequencyModal(true);
         }
+    };
 
-        const DateNavigator = ({ selectedDate, setSelectedDate }) => {
-            const changeDate = (d) => { const date = new Date(selectedDate); date.setDate(date.getDate() + d); setSelectedDate(date.toISOString().split('T')[0]); };
-            const isToday = selectedDate === getTodayString();
-            return (
-                <div className="flex items-center justify-between bg-white dark:bg-dark-800 p-3 shadow-sm border-b border-gray-100 dark:border-gray-700 sticky top-0 z-10 animate-slide-in">
-                    <button onClick={() => changeDate(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-300"><ChevronLeft size={20} /></button>
-                    <div className="relative flex flex-col items-center">
-                        <span className="text-sm font-bold text-gray-800 dark:text-white flex items-center gap-2">{isToday ? "Today" : new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} <CalendarIcon size={14} className="text-primary-500" /></span>
-                        <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-20" />
+    const confirmToggleDaily = (days) => {
+        const meal = pendingMealForFrequency;
+        const rule = dietRules.find(r => r.id === meal.ruleId);
+        if (rule) {
+            updateDietRule(rule.id, { endDate: null, days: days });
+        } else {
+            addDietRule({ name: meal.name, calories: meal.calories, protein: meal.protein, startDate: selectedDate, endDate: null, days: days })
+                .then(docRef => updateMealDb(meal.id, { ruleId: docRef.id }));
+        }
+        setShowFrequencyModal(false);
+        setPendingMealForFrequency(null);
+        showToast('Recurring Enabled');
+    };
+
+    const totalCals = localMeals.filter(m => m.completed).reduce((acc, curr) => acc + Number(curr.calories), 0);
+    const totalProt = localMeals.filter(m => m.completed).reduce((acc, curr) => acc + Number(curr.protein), 0);
+
+    return (
+        <div className="space-y-6 animate-slide-in pb-20 md:pb-0">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 col-span-1">
+                    <div className="flex items-center gap-2 text-orange-500 mb-2 font-bold text-sm"><Flame size={16} /> Cals</div>
+                    <div className="text-2xl font-black text-slate-900 dark:text-white">{totalCals}</div>
+                    <div className="text-xs text-slate-400 mb-2">of {goals.calories}</div>
+                    <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-1.5"><div className="bg-orange-500 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${mounted ? Math.min((totalCals / goals.calories) * 100, 100) : 0}%` }}></div></div>
+                </div>
+                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 col-span-1">
+                    <div className="flex items-center gap-2 text-blue-500 mb-2 font-bold text-sm"><Zap size={16} /> Prot</div>
+                    <div className="text-2xl font-black text-slate-900 dark:text-white">{totalProt}g</div>
+                    <div className="text-xs text-slate-400 mb-2">of {goals.protein}g</div>
+                    <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-1.5"><div className="bg-blue-500 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${mounted ? Math.min((totalProt / goals.protein) * 100, 100) : 0}%` }}></div></div>
+                </div>
+                <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-cyan-100 dark:border-cyan-900/30 flex items-center justify-between col-span-2">
+                    <div className="flex flex-col gap-3">
+                        <div className="flex items-center gap-2 text-cyan-500 font-bold"><Droplet size={18} /> Water Intake</div>
+                        <div className="flex gap-3">
+                            <button onClick={() => updateWater(currentWater + 1)} className="bg-cyan-500 text-white w-10 h-10 rounded-full flex items-center justify-center shadow-md hover:scale-110 transition"><Plus size={20} /></button>
+                            {currentWater > 0 && <button onClick={() => updateWater(currentWater - 1)} className="bg-slate-100 dark:bg-slate-700 text-slate-400 w-10 h-10 rounded-full flex items-center justify-center hover:bg-slate-200 transition"><Minus size={20} /></button>}
+                        </div>
                     </div>
-                    <button onClick={() => changeDate(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-300"><ChevronRight size={20} /></button>
+                    <div className="mr-2"><WaterProgressCircle value={mounted ? currentWater : 0} max={goals.water} color="#06b6d4" size={90} /></div>
                 </div>
-            );
-        };
+            </div>
 
-        const WaterProgressCircle = ({ value, max }) => {
-            const r = 45, circ = 2 * Math.PI * r, pct = Math.min(value / max, 1), offset = circ - pct * circ;
-            return (
-                <div className="relative flex items-center justify-center w-24 h-24">
-                    <svg className="w-full h-full transform -rotate-90"><circle cx="50%" cy="50%" r={r} stroke="#e2e8f0" strokeWidth="8" fill="none" /><circle cx="50%" cy="50%" r={r} stroke="#06b6d4" strokeWidth="8" fill="none" strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-1000" /></svg>
-                    <div className="absolute text-center"><span className="text-xl font-bold text-gray-900 dark:text-white">{value}L</span><br/><span className="text-[10px] text-gray-400">/ {max}L</span></div>
-                </div>
-            );
-        };
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
+                <h3 className="font-bold text-slate-900 dark:text-white mb-4">Log Meal</h3>
+                <form onSubmit={handleAddMeal} className="flex flex-col gap-3">
+                    <input type="text" placeholder="Add Meal (e.g. Oats)" className="w-full p-3 rounded-xl border dark:border-slate-600 bg-slate-50 dark:bg-slate-900 dark:text-white" value={newMeal.name} onChange={e => setNewMeal({...newMeal, name: e.target.value})} />
+                    <div className="flex gap-2">
+                        <input type="number" placeholder="Cals" className="w-full p-3 rounded-xl border dark:border-slate-600 bg-slate-50 dark:bg-slate-900 dark:text-white text-center" value={newMeal.calories} onChange={e => setNewMeal({...newMeal, calories: e.target.value})} />
+                        <input type="number" placeholder="Prot" className="w-full p-3 rounded-xl border dark:border-slate-600 bg-slate-50 dark:bg-slate-900 dark:text-white text-center" value={newMeal.protein} onChange={e => setNewMeal({...newMeal, protein: e.target.value})} />
+                        <button className="bg-green-600 text-white px-4 rounded-xl font-bold"><Plus /></button>
+                    </div>
+                </form>
+            </div>
 
-        // --- NEW LANDING PAGE ---
-        function LandingPage({ setView }) {
-            return (
-                <div className="bg-slate-50 text-slate-900 font-sans min-h-screen">
-                    <nav className="fixed w-full bg-white/80 backdrop-blur-md border-b border-slate-200 z-50">
-                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex justify-between items-center">
-                            <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('landing')}>
-                                <Activity className="text-primary-600 w-8 h-8" />
+            <div className="space-y-3">
+                {localMeals.map(meal => {
+                    const activeRule = dietRules.find(r => r.id === meal.ruleId);
+                    const isRepeating = activeRule && (activeRule.endDate === null || activeRule.endDate > selectedDate);
+                    return (
+                        <div key={meal.id} className={`flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 hover:shadow-sm transition hover:bg-slate-50 dark:hover:bg-slate-800/50 ${meal.completed ? 'opacity-50' : ''}`}>
+                            <div className="flex items-center gap-3 overflow-hidden flex-1">
+                                <button onClick={() => handleToggleMeal(meal)} className={`text-xl ${meal.completed ? 'text-green-500' : 'text-slate-300 dark:text-slate-600'}`}>{meal.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
+                                <div><p className={`font-medium text-slate-800 dark:text-white ${meal.completed ? 'line-through' : ''}`}>{meal.name}</p><p className="text-xs text-slate-500 dark:text-slate-400">{meal.calories} cal • {meal.protein}g prot</p></div>
+                            </div>
+                            <div className="flex items-center gap-3 ml-2">
+                                <button onClick={() => initiateToggleDaily(meal)} className={`w-8 h-5 rounded-full relative transition-colors ${isRepeating ? 'bg-blue-600' : 'bg-slate-200 dark:bg-slate-700'}`}><span className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full transition-transform ${isRepeating ? 'translate-x-3' : ''}`}></span></button>
+                                <button onClick={() => handleDeleteMeal(meal)} className="text-slate-300 hover:text-red-500"><Trash2 size={18} /></button>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+            {showFrequencyModal && <FrequencyModal onClose={() => { setShowFrequencyModal(false); setPendingMealForFrequency(null); }} onSave={confirmToggleDaily} initialDays={pendingMealForFrequency?.ruleId ? dietRules.find(r => r.id === pendingMealForFrequency.ruleId)?.days : undefined} />}
+        </div>
+    );
+}
+
+// --- APP SHELL (Main Logic) ---
+
+export default function App() {
+    const [user, setUser] = useState(null);
+    const [activeTab, setActiveTab] = useState('dashboard');
+    const [darkMode, setDarkMode] = useState(false);
+    const [showSettings, setShowSettings] = useState(false);
+    const [authModal, setAuthModal] = useState(null); // 'login' or 'register'
+    const [goals, setGoals] = useState({ calories: 2500, protein: 160, water: 4 });
+    const [globalDate, setGlobalDate] = useState(getTodayString()); // Moved hook up
+
+    useEffect(() => {
+        if(darkMode) document.documentElement.classList.add('dark');
+        else document.documentElement.classList.remove('dark');
+    }, [darkMode]);
+
+    useEffect(() => {
+        if (auth) {
+            const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
+            return unsubscribe;
+        } else {
+            const guest = localStorage.getItem('lifetrack_guest');
+            if (guest) setUser({ uid: 'guest', displayName: 'Guest User' });
+        }
+    }, []);
+
+    const loginAsGuest = () => {
+        const guestUser = { uid: 'guest', displayName: 'Guest User' };
+        setUser(guestUser);
+        localStorage.setItem('lifetrack_guest', 'true');
+        setAuthModal(null);
+    };
+
+    const handleLogout = () => {
+        if (auth) signOut(auth);
+        setUser(null);
+        localStorage.removeItem('lifetrack_guest');
+        setActiveTab('dashboard');
+    };
+
+    useEffect(() => {
+        if (user && user.uid !== 'guest' && db) {
+            const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'goals');
+            getDoc(docRef).then(docSnap => { if(docSnap.exists() && docSnap.data().goals) setGoals(docSnap.data().goals); });
+        } else if (user && user.uid === 'guest') {
+            const saved = localStorage.getItem('lifetrack_goals');
+            if (saved) setGoals(JSON.parse(saved));
+        }
+    }, [user]);
+
+    const saveGoals = (newGoals) => {
+        setGoals(newGoals);
+        if (user && user.uid !== 'guest' && db) {
+            const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'goals');
+            setDoc(docRef, { goals: newGoals }, { merge: true });
+        } else {
+            localStorage.setItem('lifetrack_goals', JSON.stringify(newGoals));
+        }
+        setShowSettings(false);
+    };
+
+    // --- RENDER ---
+
+    if (!user) {
+        return (
+            <div className="bg-slate-50 text-slate-900 font-sans min-h-screen">
+                <style>{`.gradient-text { background: linear-gradient(135deg, #2563EB 0%, #1E40AF 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }`}</style>
+                
+                {/* Landing Page Nav */}
+                <nav className="fixed w-full bg-white/80 backdrop-blur-md border-b border-slate-200 z-50">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        <div className="flex justify-between items-center h-16">
+                            <div className="flex items-center gap-2">
+                                <Activity className="text-blue-600 w-8 h-8" />
                                 <span className="font-bold text-xl tracking-tight">LifeTrack Pro</span>
                             </div>
-                            <div className="hidden md:flex space-x-8">
-                                <a href="#features" className="text-slate-600 hover:text-primary-600 transition">Features</a>
-                                <a href="#pricing" className="text-slate-600 hover:text-primary-600 transition">Pricing</a>
-                            </div>
-                            <div className="flex gap-4">
-                                <button onClick={() => setView('login')} className="text-slate-600 hover:text-primary-600 font-medium">Login</button>
-                                <button onClick={() => setView('login')} className="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2 rounded-full font-medium shadow-lg">Get Started</button>
+                            <div className="flex items-center gap-4">
+                                <button onClick={() => setAuthModal('login')} className="text-slate-600 hover:text-blue-600 font-medium">Login</button>
+                                <button onClick={() => setAuthModal('register')} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-full font-medium shadow-lg shadow-blue-600/20">Get Started</button>
                             </div>
                         </div>
-                    </nav>
+                    </div>
+                </nav>
 
-                    {/* Hero Section */}
-                    <section className="pt-32 pb-20 lg:pt-40 lg:pb-28 overflow-hidden text-center px-4">
-                        <h1 className="text-5xl lg:text-7xl font-bold text-slate-900 mb-6">Track Your Life <br/><span className="text-primary-600">Better Than Ever</span></h1>
-                        <p className="text-xl text-slate-600 mb-10 max-w-2xl mx-auto">Build habits, track workouts, and monitor diet with data-driven insights.</p>
-                        <div className="flex justify-center gap-4">
-                            <button onClick={() => setView('login')} className="px-8 py-4 bg-primary-600 text-white rounded-xl font-bold text-lg hover:shadow-xl transition">Start Tracking Free</button>
+                {/* Hero Section */}
+                <section className="pt-32 pb-20 lg:pt-40 lg:pb-28 overflow-hidden">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+                        <div className="inline-flex items-center px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-sm font-medium mb-6"><span className="mr-2">✨</span> New: AI-Powered Insights 2.0</div>
+                        <h1 className="text-5xl lg:text-7xl font-bold tracking-tight mb-8 text-slate-900">Track Your Life <br /><span className="gradient-text">Better Than Ever</span></h1>
+                        <p className="text-xl text-slate-600 mb-10 max-w-2xl mx-auto leading-relaxed">The all-in-one platform for tracking habits, health, and goals.</p>
+                        <div className="flex flex-col sm:flex-row justify-center gap-4">
+                            <button onClick={() => setAuthModal('register')} className="px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl font-semibold text-lg hover:shadow-xl hover:shadow-blue-600/20">Start Tracking Free</button>
+                            <button className="px-8 py-4 bg-white text-slate-700 border border-slate-200 rounded-xl font-semibold text-lg hover:bg-slate-50 flex items-center justify-center gap-2"><PlayCircle className="w-5 h-5" /> Watch Demo</button>
                         </div>
-                    </section>
+                    </div>
+                </section>
 
-                    {/* Features */}
-                    <section id="features" className="py-20 bg-white">
-                        <div className="max-w-7xl mx-auto px-4 text-center">
-                            <h2 className="text-3xl font-bold mb-12">Everything you need</h2>
-                            <div className="grid md:grid-cols-3 gap-8">
-                                <div className="p-8 bg-slate-50 rounded-2xl border hover:shadow-lg transition">
-                                    <div className="w-12 h-12 bg-primary-100 text-primary-600 rounded-xl flex items-center justify-center mb-4 mx-auto"><HeartPulse size={24} /></div>
-                                    <h3 className="text-xl font-bold mb-2">Health Tracking</h3>
-                                    <p className="text-slate-600">Monitor diet, water, and workouts in one place.</p>
+                {/* Features */}
+                <section className="py-20 bg-white">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        <div className="grid md:grid-cols-3 gap-8">
+                            {[
+                                { icon: HeartPulse, title: 'Health Tracking', desc: 'Monitor vitals & sleep.' },
+                                { icon: Target, title: 'Daily Goals', desc: 'Crush your objectives.' },
+                                { icon: BarChart2, title: 'Analytics', desc: 'Visualize your growth.' }
+                            ].map((f, i) => (
+                                <div key={i} className="p-8 rounded-2xl bg-slate-50 border border-slate-100 hover:border-blue-200 hover:shadow-lg transition group">
+                                    <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-6 group-hover:bg-blue-600 transition"><f.icon className="w-6 h-6 text-blue-600 group-hover:text-white transition" /></div>
+                                    <h3 className="text-xl font-bold mb-3">{f.title}</h3>
+                                    <p className="text-slate-600">{f.desc}</p>
                                 </div>
-                                <div className="p-8 bg-slate-50 rounded-2xl border hover:shadow-lg transition">
-                                    <div className="w-12 h-12 bg-primary-100 text-primary-600 rounded-xl flex items-center justify-center mb-4 mx-auto"><Target size={24} /></div>
-                                    <h3 className="text-xl font-bold mb-2">Daily Goals</h3>
-                                    <p className="text-slate-600">Set tasks and build consistent habits.</p>
-                                </div>
-                                <div className="p-8 bg-slate-50 rounded-2xl border hover:shadow-lg transition">
-                                    <div className="w-12 h-12 bg-primary-100 text-primary-600 rounded-xl flex items-center justify-center mb-4 mx-auto"><BarChart2 size={24} /></div>
-                                    <h3 className="text-xl font-bold mb-2">Progress</h3>
-                                    <p className="text-slate-600">Visualize your growth with clean dashboards.</p>
-                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+
+                {/* Pricing Section (Restored) */}
+                <section id="pricing" className="py-20 bg-slate-50">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        <div className="text-center mb-16">
+                            <h2 className="text-3xl font-bold text-slate-900 mb-4">Simple, transparent pricing</h2>
+                            <p className="text-lg text-slate-600">Choose the plan that fits your lifestyle.</p>
+                        </div>
+
+                        <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+                            {/* Free Plan */}
+                            <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition">
+                                <h3 className="text-xl font-bold text-slate-900">Starter</h3>
+                                <div className="my-4"><span className="text-4xl font-bold">Free</span></div>
+                                <p className="text-slate-500 mb-6 text-sm">Forever free for individuals.</p>
+                                <ul className="space-y-3 mb-8">
+                                    {['Basic Tracking', '3 Goals per day', '7-day history'].map((item, idx) => (
+                                        <li key={idx} className="flex items-center text-slate-600 text-sm"><Check className="w-4 h-4 text-green-500 mr-2" /> {item}</li>
+                                    ))}
+                                </ul>
+                                <button onClick={() => setAuthModal('register')} className="w-full py-3 px-4 border border-slate-200 rounded-xl font-medium text-slate-600 hover:bg-slate-50 transition">Get Started</button>
+                            </div>
+
+                            {/* Pro Plan */}
+                            <div className="bg-white p-8 rounded-2xl border-2 border-blue-600 shadow-xl relative transform scale-105 z-10">
+                                <div className="absolute top-0 right-0 bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-bl-xl rounded-tr-xl">POPULAR</div>
+                                <h3 className="text-xl font-bold text-slate-900">Pro</h3>
+                                <div className="my-4"><span className="text-4xl font-bold">₹99</span><span className="text-slate-500">/mo</span></div>
+                                <p className="text-slate-500 mb-6 text-sm">For serious self-improvers.</p>
+                                <ul className="space-y-3 mb-8">
+                                    {['Unlimited Tracking', 'Advanced Charts', 'Priority Support'].map((item, idx) => (
+                                        <li key={idx} className="flex items-center text-slate-600 text-sm"><Check className="w-4 h-4 text-green-500 mr-2" /> {item}</li>
+                                    ))}
+                                </ul>
+                                <button onClick={() => setAuthModal('register')} className="w-full py-3 px-4 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-600/25">Upgrade to Pro</button>
+                            </div>
+
+                            {/* Premium Plan */}
+                            <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition">
+                                <h3 className="text-xl font-bold text-slate-900">Premium</h3>
+                                <div className="my-4"><span className="text-4xl font-bold">₹299</span><span className="text-slate-500">/mo</span></div>
+                                <p className="text-slate-500 mb-6 text-sm">Complete access for power users.</p>
+                                <ul className="space-y-3 mb-8">
+                                    {['AI Coaching', 'Data Export', 'Team Features'].map((item, idx) => (
+                                        <li key={idx} className="flex items-center text-slate-600 text-sm"><Check className="w-4 h-4 text-green-500 mr-2" /> {item}</li>
+                                    ))}
+                                </ul>
+                                <button className="w-full py-3 px-4 border border-slate-200 rounded-xl font-medium text-slate-600 hover:bg-slate-50 transition">Contact Sales</button>
                             </div>
                         </div>
-                    </section>
+                    </div>
+                </section>
 
-                    {/* Pricing */}
-                    <section id="pricing" className="py-20 bg-slate-50">
-                        <div className="max-w-7xl mx-auto px-4 text-center">
-                            <h2 className="text-3xl font-bold mb-12">Simple Pricing</h2>
-                            <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-                                <div className="bg-white p-8 rounded-2xl border shadow-sm">
-                                    <h3 className="text-xl font-bold">Starter</h3>
-                                    <div className="text-4xl font-bold my-4">Free</div>
-                                    <ul className="text-sm text-slate-600 space-y-2 mb-6">
-                                        <li className="flex items-center gap-2"><Check size={16} className="text-green-500"/> Basic Tracking</li>
-                                        <li className="flex items-center gap-2"><Check size={16} className="text-green-500"/> 7-day history</li>
+                {/* Newsletter Section (Restored) */}
+                <section className="py-24 bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white">
+                    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+                        <h2 className="text-3xl md:text-5xl font-bold mb-8 leading-tight">Get weekly productivity tips and product updates directly in your inbox. No spam, ever.</h2>
+                        <div className="max-w-xl mx-auto bg-slate-800/50 p-1.5 rounded-full border border-slate-700 flex items-center mb-6 focus-within:ring-2 focus-within:ring-blue-500 transition">
+                            <input type="email" placeholder="Enter your email address" className="w-full bg-transparent px-6 py-3 text-white placeholder-slate-400 focus:outline-none rounded-l-full" />
+                            <button className="bg-white text-slate-900 font-bold text-base px-8 py-3 rounded-full hover:bg-slate-100 transition whitespace-nowrap">Subscribe</button>
+                        </div>
+                        <div className="flex items-center justify-center gap-2 text-slate-500 text-xs">
+                            <Shield className="w-3 h-3" />
+                            <span>No hidden surveillance code. Your data is private.</span>
+                        </div>
+                    </div>
+                </section>
+
+                {/* Expanded Footer (Restored) */}
+                <footer className="bg-white pt-20 pb-10 border-t border-slate-200">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-16">
+                            <div className="md:col-span-1">
+                                <div className="flex items-center gap-2 mb-6">
+                                    <Activity className="text-blue-600 w-8 h-8" />
+                                    <span className="font-bold text-2xl text-slate-900">LifeTrack Pro</span>
+                                </div>
+                                <p className="text-sm text-slate-500 mb-6 leading-relaxed">Making self-improvement accessible, data-driven, and effective for everyone.</p>
+                                <div className="flex gap-1 text-slate-400">
+                                    <Star className="w-4 h-4 fill-current" />
+                                    <Star className="w-4 h-4 fill-current" />
+                                    <Star className="w-4 h-4 fill-current" />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-8 md:col-span-3">
+                                <div>
+                                    <h4 className="font-bold text-base text-slate-900 mb-4">Product</h4>
+                                    <ul className="space-y-3">
+                                        {['Features', 'Pricing', 'Integrations', 'Changelog'].map((item) => (
+                                            <li key={item}><a href="#" className="text-sm text-slate-500 hover:text-blue-600 transition">{item}</a></li>
+                                        ))}
                                     </ul>
-                                    <button onClick={() => setView('login')} className="w-full py-3 border rounded-xl font-medium hover:bg-slate-50">Get Started</button>
                                 </div>
-                                <div className="bg-white p-8 rounded-2xl border-2 border-primary-600 shadow-xl relative transform scale-105">
-                                    <div className="absolute top-0 right-0 bg-primary-600 text-white text-xs font-bold px-3 py-1 rounded-bl-xl rounded-tr-xl">POPULAR</div>
-                                    <h3 className="text-xl font-bold">Pro</h3>
-                                    <div className="text-4xl font-bold my-4">₹99<span className="text-sm font-normal text-slate-500">/mo</span></div>
-                                    <ul className="text-sm text-slate-600 space-y-2 mb-6">
-                                        <li className="flex items-center gap-2"><Check size={16} className="text-green-500"/> Unlimited Tracking</li>
-                                        <li className="flex items-center gap-2"><Check size={16} className="text-green-500"/> Advanced Charts</li>
+                                <div>
+                                    <h4 className="font-bold text-base text-slate-900 mb-4">Company</h4>
+                                    <ul className="space-y-3">
+                                        {['About Us', 'Careers', 'Blog', 'Contact'].map((item) => (
+                                            <li key={item}><a href="#" className="text-sm text-slate-500 hover:text-blue-600 transition">{item}</a></li>
+                                        ))}
                                     </ul>
-                                    <button onClick={() => setView('login')} className="w-full py-3 bg-primary-600 text-white rounded-xl font-medium hover:bg-primary-700">Upgrade</button>
                                 </div>
-                                <div className="bg-white p-8 rounded-2xl border shadow-sm">
-                                    <h3 className="text-xl font-bold">Premium</h3>
-                                    <div className="text-4xl font-bold my-4">₹299<span className="text-sm font-normal text-slate-500">/mo</span></div>
-                                    <ul className="text-sm text-slate-600 space-y-2 mb-6">
-                                        <li className="flex items-center gap-2"><Check size={16} className="text-green-500"/> All Pro Features</li>
-                                        <li className="flex items-center gap-2"><Check size={16} className="text-green-500"/> Priority Support</li>
+                                <div>
+                                    <h4 className="font-bold text-base text-slate-900 mb-4">Legal</h4>
+                                    <ul className="space-y-3">
+                                        {['Privacy', 'Terms', 'Security'].map((item) => (
+                                            <li key={item}><a href="#" className="text-sm text-slate-500 hover:text-blue-600 transition">{item}</a></li>
+                                        ))}
                                     </ul>
-                                    <button className="w-full py-3 border rounded-xl font-medium hover:bg-slate-50">Contact Sales</button>
                                 </div>
                             </div>
                         </div>
-                    </section>
-
-                    {/* Footer */}
-                    <footer className="bg-white pt-10 pb-6 border-t border-slate-200">
-                        <div className="max-w-7xl mx-auto px-4 text-center text-slate-400 text-sm">
+                        <div className="pt-8 border-t border-slate-100 flex flex-col md:flex-row justify-between items-center text-xs text-slate-400">
                             <p>© 2026 LifeTrack Pro. All rights reserved.</p>
-                        </div>
-                    </footer>
-                </div>
-            );
-        }
-
-        function Sidebar({ activeTab, setActiveTab, user, setDarkMode, darkMode, setShowSettings }) {
-            return (
-                <div className="flex flex-col h-full p-4">
-                    <div className="flex items-center gap-2 text-primary-600 dark:text-primary-500 mb-8 px-2"><Activity size={32} /><h1 className="text-2xl font-bold dark:text-white">LifeTrack</h1></div>
-                    <div className="flex-1 space-y-1">
-                        {[{id: 'dashboard', Icon: Home, label: 'Dashboard'}, {id: 'todo', Icon: CheckSquare, label: 'Tasks'}, {id: 'gym', Icon: Dumbbell, label: 'Gym'}, {id: 'diet', Icon: Utensils, label: 'Diet'}].map(({id, Icon, label}) => (
-                            <button key={id} onClick={() => setActiveTab(id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === id ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 font-bold' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}><Icon size={20} /> {label}</button>
-                        ))}
-                    </div>
-                    <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2">
-                        <button onClick={() => setDarkMode(!darkMode)} className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800">{darkMode ? <Sun size={20} /> : <Moon size={20} />} Theme</button>
-                        <button onClick={() => setShowSettings(true)} className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"><Settings size={20} /> Settings</button>
-                        <div className="flex items-center gap-3 px-4 py-2 mt-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
-                            <img src={user.photoURL} className="w-8 h-8 rounded-full border border-gray-200" /><div className="flex-1 overflow-hidden"><p className="text-xs font-bold truncate dark:text-white">{user.displayName}</p><button onClick={() => auth.signOut()} className="text-[10px] text-red-500 flex items-center gap-1">Log Out <Logout size={10}/></button></div>
+                            <p className="mt-4 md:mt-0">Made with passion for better living.</p>
                         </div>
                     </div>
-                </div>
-            );
-        }
+                </footer>
 
-        function NavButton({ active, onClick, icon, label }) {
-            return (
-                <button onClick={onClick} className={`flex flex-col items-center gap-1 transition-all ${active ? 'text-primary-600 dark:text-primary-500 transform scale-105' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500'}`}>
-                    {icon}<span className="text-[10px] font-medium">{label}</span>
-                </button>
-            );
-        }
-
-        function DashboardSection({ userId, selectedDate, goals }) {
-            const { data: diet } = useFirestore(userId, 'diet');
-            const { data: todos } = useFirestore(userId, 'todos');
-            const { data: water } = useFirestore(userId, 'water');
-            const { data: gym } = useFirestore(userId, 'gym'); 
-            
-            const todaysMeals = diet.filter(m => m.date === selectedDate && m.completed);
-            const calCurrent = todaysMeals.reduce((acc, curr) => acc + Number(curr.calories), 0);
-            const protCurrent = todaysMeals.reduce((acc, curr) => acc + Number(curr.protein), 0);
-            const waterLog = water.find(w => w.date === selectedDate);
-            const waterCurrent = waterLog ? waterLog.amount : 0;
-            const todaysTasks = todos.filter(t => t.date === selectedDate);
-            const tasksDone = todaysTasks.filter(t => t.completed).length;
-            const tasksTotal = todaysTasks.length;
-            const gymDone = gym.some(w => w.date === selectedDate);
-            const calPct = goals.calories ? Math.round((calCurrent/goals.calories)*100) : 0;
-            const waterPct = goals.water ? Math.round((waterCurrent/goals.water)*100) : 0;
-            const taskPct = tasksTotal ? Math.round((tasksDone/tasksTotal)*100) : 0;
-
-            const displayDate = new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-            const isToday = selectedDate === getTodayString();
-
-            return (
-                <div className="space-y-6 animate-fade-in max-w-5xl mx-auto">
-                    <div className="bg-gradient-to-r from-primary-600 to-indigo-700 rounded-2xl p-6 text-white shadow-xl hover-card">
-                        <h2 className="text-2xl font-bold mb-1">Hello, {userId === 'guest' ? 'Guest' : 'Chief'}! 👋</h2>
-                        <p className="text-indigo-100 text-sm mb-6">Here is your summary for {isToday ? 'today' : displayDate}.</p>
-                        <div className="flex justify-between text-center divide-x divide-indigo-500/30">
-                            <div className="px-4"><div className="text-2xl font-bold">{calPct}%</div><div className="text-[10px] uppercase opacity-70 tracking-wider">Diet</div></div>
-                            <div className="px-4"><div className="text-2xl font-bold">{taskPct}%</div><div className="text-[10px] uppercase opacity-70 tracking-wider">Tasks</div></div>
-                            <div className="px-4"><div className="text-2xl font-bold">{waterPct}%</div><div className="text-[10px] uppercase opacity-70 tracking-wider">Hydration</div></div>
+                {/* Auth Modal */}
+                {authModal && (
+                    <div className="fixed inset-0 z-[60] bg-white flex flex-col items-center justify-center p-4 animate-in fade-in duration-300">
+                        <div className="w-full max-w-sm text-center">
+                            <div className="flex justify-center mb-4 text-blue-600"><Activity size={48} /></div>
+                            <h1 className="text-2xl font-bold text-slate-800 mb-2">LifeTrack Pro</h1>
+                            <p className="text-slate-500 mb-8 text-sm">Your personal hub for fitness, diet & life.</p>
+                            <button onClick={() => { if(auth) signInAnonymously(auth); else loginAsGuest(); }} className="w-full bg-white border border-slate-300 p-3 rounded-xl hover:bg-slate-50 transition shadow-sm font-medium text-slate-700 mb-3">Sign in / Demo Login</button>
+                            <div className="relative flex py-2 items-center"><div className="flex-grow border-t border-slate-300"></div><span className="flex-shrink mx-4 text-slate-400 text-xs">OR</span><div className="flex-grow border-t border-slate-300"></div></div>
+                            <button onClick={loginAsGuest} className="w-full bg-slate-800 text-white p-3 rounded-xl hover:bg-slate-900 transition shadow-md font-medium mt-3">Skip Login (Guest Mode)</button>
+                            <button onClick={() => setAuthModal(null)} className="mt-6 text-slate-400 text-sm hover:text-slate-600">Back to Home</button>
                         </div>
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="bg-white dark:bg-dark-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm hover-card">
-                            <div className="flex items-center gap-2 text-primary-500 mb-2 font-bold text-sm"><CheckSquare size={16} /> Tasks</div>
-                            <div className="text-2xl font-bold text-gray-900 dark:text-white">{tasksDone}<span className="text-gray-400 text-sm">/{tasksTotal}</span></div>
-                            <div className="w-full bg-gray-100 dark:bg-gray-700 h-1.5 rounded-full mt-2 overflow-hidden"><div className="bg-primary-500 h-full rounded-full transition-all duration-1000" style={{width: `${tasksTotal ? (tasksDone/tasksTotal)*100 : 0}%`}}></div></div>
-                        </div>
-                        <div className="bg-white dark:bg-dark-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-center gap-3 hover-card">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-1 text-orange-500 font-bold text-xs"><Flame size={14} /> Cals</div>
-                                <div className="text-gray-300">/</div>
-                                <div className="flex items-center gap-1 text-blue-500 font-bold text-xs"><Zap size={14} /> Prot</div>
-                            </div>
-                            <div className="space-y-2">
-                                <div>
-                                    <div className="flex justify-between text-[10px] text-gray-500 mb-0.5"><span>{calCurrent}</span><span>{goals.calories}</span></div>
-                                    <div className="w-full bg-gray-100 dark:bg-gray-700 h-1.5 rounded-full overflow-hidden"><div className="bg-orange-500 h-full rounded-full transition-all duration-1000" style={{width: `${Math.min((calCurrent/goals.calories)*100, 100)}%`}}></div></div>
-                                </div>
-                                <div>
-                                    <div className="flex justify-between text-[10px] text-gray-500 mb-0.5"><span>{protCurrent}g</span><span>{goals.protein}g</span></div>
-                                    <div className="w-full bg-gray-100 dark:bg-gray-700 h-1.5 rounded-full overflow-hidden"><div className="bg-blue-500 h-full rounded-full transition-all duration-1000" style={{width: `${Math.min((protCurrent/goals.protein)*100, 100)}%`}}></div></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="bg-white dark:bg-dark-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm hover-card">
-                            <div className="flex items-center gap-2 text-cyan-500 mb-2 font-bold text-sm"><Droplet size={16} /> Water</div>
-                            <div className="text-2xl font-bold text-gray-900 dark:text-white">{waterCurrent}L</div><div className="text-xs text-gray-400">of {goals.water}L</div>
-                        </div>
-                        <div className={`p-4 rounded-xl border shadow-sm flex flex-col justify-center items-center hover-card bg-white border-gray-100 dark:bg-dark-800 dark:border-gray-700`}>
-                            <div className={`mb-1 text-green-600`}><Dumbbell size={24} /></div><div className={`text-sm font-bold text-green-700`}>Keep Going</div>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
+                )}
+            </div>
+        );
+    }
 
-        function TaskDetailsPage({ task, onClose, onUpdate }) {
-            const [newSub, setNewSub] = useState('');
-            const [noteText, setNoteText] = useState(task.note || '');
-            const [activeSubtaskForDetails, setActiveSubtaskForDetails] = useState(null);
-
-            const handleNoteChange = (e) => { setNoteText(e.target.value); onUpdate(task.id, { ...task, note: e.target.value }); };
-            const handleAddSub = (e) => { e.preventDefault(); if(!newSub.trim()) return; const updated = [...(task.subtasks || []), { id: Date.now(), text: newSub, completed: false, subtasks: [], note: "" }]; onUpdate(task.id, { ...task, subtasks: updated }); setNewSub(''); };
-            const toggleSub = (subId) => { const updated = task.subtasks.map(s => s.id === subId ? { ...s, completed: !s.completed } : s); onUpdate(task.id, { ...task, subtasks: updated }); };
-            const deleteSub = (subId) => { const updated = task.subtasks.filter(s => s.id !== subId); onUpdate(task.id, { ...task, subtasks: updated }); };
-            
-            const handleSubtaskUpdate = (subId, updatedData) => {
-                const updatedSubtasks = task.subtasks.map(s => s.id === subId ? updatedData : s);
-                onUpdate(task.id, { ...task, subtasks: updatedSubtasks });
-                if (activeSubtaskForDetails && activeSubtaskForDetails.id === subId) {
-                    setActiveSubtaskForDetails(updatedData);
-                }
-            };
-
-            const total = task.subtasks ? task.subtasks.length : 0;
-            const completed = task.subtasks ? task.subtasks.filter(s => s.completed).length : 0;
-
-            return (
-                <div className="fixed inset-0 bg-white dark:bg-dark-900 z-50 flex flex-col animate-slide-in">
-                    <div className="bg-primary-600 p-4 text-white shadow-md flex items-center gap-3">
-                        <button onClick={onClose} className="p-1 hover:bg-primary-700 rounded"><ArrowLeft size={24} /></button>
-                        <div className="flex-1"><h3 className="font-bold text-lg leading-tight truncate">{task.text}</h3></div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                        <div>
-                            <div className="flex justify-between items-center mb-2"><h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Checklist</h4><span className="text-xs font-medium bg-gray-100 dark:bg-dark-800 px-2 py-1 rounded text-gray-600 dark:text-gray-300">{completed}/{total} Done</span></div>
-                            <form onSubmit={handleAddSub} className="flex gap-2 mb-3">
-                                <input type="text" value={newSub} onChange={e => setNewSub(e.target.value)} placeholder="Add subtask..." className="flex-1 p-3 bg-gray-50 dark:bg-dark-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-white transition-all" />
-                                <button className="bg-primary-600 text-white px-4 rounded-xl hover:bg-primary-700 font-bold text-xl flex items-center justify-center"><Plus size={24} /></button>
-                            </form>
-                            <div className="space-y-2">
-                                {task.subtasks?.map(sub => {
-                                    const nestedCount = sub.subtasks ? sub.subtasks.length : 0;
-                                    const nestedCompleted = sub.subtasks ? sub.subtasks.filter(s => s.completed).length : 0;
-                                    return (
-                                        <div key={sub.id} className="flex items-center justify-between p-3 bg-white dark:bg-dark-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm transition-all hover-card">
-                                            <div className="flex items-center gap-3 overflow-hidden flex-1">
-                                                <button onClick={() => toggleSub(sub.id)} className={`flex-shrink-0 text-xl transition-colors ${sub.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{sub.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
-                                                <div className="flex flex-col">
-                                                    <span className={`text-base font-medium truncate ${sub.completed ? 'line-through text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-200'}`}>{sub.text}</span>
-                                                    {nestedCount > 0 && <span className="text-[10px] bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 px-1.5 py-0.5 rounded-md flex items-center gap-1 w-fit mt-1"><FileText size={10} /> {nestedCompleted}/{nestedCount}</span>}
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <button onClick={() => setActiveSubtaskForDetails(sub)} className="p-1.5 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-300"><FileText size={16} /></button>
-                                                <button onClick={() => deleteSub(sub.id)} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={16} /></button>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                        <div>
-                            <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Notes</h4>
-                            <textarea value={noteText} onChange={handleNoteChange} placeholder="Type notes here..." className="w-full h-40 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400 text-gray-700 dark:text-yellow-100 resize-none leading-relaxed"></textarea>
-                        </div>
-                    </div>
-                    {activeSubtaskForDetails && <TaskDetailsPage task={activeSubtaskForDetails} onClose={() => setActiveSubtaskForDetails(null)} onUpdate={handleSubtaskUpdate} />}
-                </div>
-            );
-        }
-
-        // --- TODO SECTION ---
-        function TodoSection({ userId, selectedDate, setSelectedDate }) {
-            const { showToast } = useContext(ToastContext);
-            const { data: tasks, add: addTaskToDb, update: updateTaskInDb, remove: removeTaskFromDb } = useFirestore(userId, 'todos');
-            const { data: dailyRules, add: addRule, update: updateRule } = useFirestore(userId, 'dailyRules');
-            const { data: deletedInstances, add: addDeletedInstance, remove: removeDeletedInstance } = useFirestore(userId, 'deletedInstances');
-            const [localTasks, setLocalTasks] = useState([]);
-            const [newTask, setNewTask] = useState('');
-            const [activeTaskForDetails, setActiveTaskForDetails] = useState(null);
-            const [category, setCategory] = useState('General');
-            const [showFrequencyModal, setShowFrequencyModal] = useState(false);
-            const [pendingTaskForFrequency, setPendingTaskForFrequency] = useState(null);
-            const [showBulkAdd, setShowBulkAdd] = useState(false);
-
-            useEffect(() => {
-                const manualTasks = tasks.filter(t => t.date === selectedDate);
-                const generatedTasks = [];
-                const dayOfWeek = new Date(selectedDate).getDay();
-
-                dailyRules.forEach(rule => {
-                    const isStarted = rule.startDate <= selectedDate;
-                    const isNotEnded = rule.endDate === null || rule.endDate >= selectedDate;
-                    const isCorrectDay = !rule.days || rule.days.includes(dayOfWeek);
-
-                    if (isStarted && isNotEnded && isCorrectDay) {
-                        const deletedDoc = deletedInstances.find(d => d.ruleId === rule.id && d.date === selectedDate);
-                        const exists = tasks.some(t => t.ruleId === rule.id && t.date === selectedDate);
-                        
-                        if (!deletedDoc && !exists) {
-                            const derivedTime = isNaN(Number(rule.id)) ? '0' : new Date(Number(rule.id)).toISOString();
-                            generatedTasks.push({ id: `virtual_${rule.id}_${selectedDate}`, text: rule.text, category: rule.category, completed: false, date: selectedDate, ruleId: rule.id, subtasks: [], note: "", isVirtual: true, createdAt: derivedTime });
-                        }
-                    }
-                });
-
-                const combined = [...manualTasks, ...generatedTasks];
-                combined.sort((a, b) => {
-                    const dateA = a.createdAt || ''; 
-                    const dateB = b.createdAt || '';
-                    if (dateB < dateA) return -1;
-                    if (dateB > dateA) return 1;
-                    return 0;
-                });
+    // --- PRO DASHBOARD (LOGGED IN) ---
+    // (This part remains unchanged and uses the sections defined previously)
+    return (
+        <ToastProvider>
+            <div className="h-full flex flex-col md:flex-row bg-slate-50 dark:bg-slate-900 transition-colors duration-300 min-h-screen">
+                <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} user={user} onLogout={handleLogout} darkMode={darkMode} setDarkMode={setDarkMode} setShowSettings={setShowSettings} />
                 
-                setLocalTasks(combined);
-            }, [tasks, dailyRules, deletedInstances, selectedDate]);
-
-            const handleAddTask = (e) => { 
-                e.preventDefault(); 
-                if(!newTask.trim()) return; 
-                addTaskToDb({ 
-                    text: newTask, 
-                    category: category, 
-                    completed: false, 
-                    date: selectedDate, 
-                    subtasks: [], 
-                    note: "" 
-                }); 
-                setNewTask(''); 
-                showToast('Task Added'); 
-            };
-            const handleToggleTask = (task) => { if (isVirtualItem(task)) { addTaskToDb({ text: task.text, category: task.category, date: selectedDate, ruleId: task.ruleId, subtasks: [], note: "", completed: !task.completed }); } else { updateTaskInDb(task.id, { completed: !task.completed }); } };
-            
-            const handleDeleteTask = (task) => { 
-                if (isVirtualItem(task)) { 
-                    addDeletedInstance({ ruleId: task.ruleId, date: selectedDate }).then((ref) => {
-                        showToast('Task Deleted', 'default', {
-                            label: 'UNDO',
-                            onClick: () => removeDeletedInstance(ref.id)
-                        });
-                    });
-                } else { 
-                    const taskData = { ...task };
-                    const cleanTaskData = cleanData(taskData);
-                    removeTaskFromDb(task.id);
-                    if (task.ruleId) { 
-                        addDeletedInstance({ ruleId: task.ruleId, date: selectedDate }).then((ref) => {
-                             showToast('Task Deleted', 'default', { label: 'UNDO', onClick: () => { removeDeletedInstance(ref.id); } });
-                        });
-                    } else {
-                        showToast('Task Deleted', 'default', { label: 'UNDO', onClick: () => addTaskToDb(cleanTaskData) });
-                    }
-                } 
-            };
-            
-            const handleUpdateDetails = (taskId, updatedData) => { 
-                const task = localTasks.find(t => t.id === taskId);
-                if (isVirtualItem(task)) { addTaskToDb({ text: task.text, category: task.category, date: selectedDate, ruleId: task.ruleId, subtasks: updatedData.subtasks, note: updatedData.note, completed: task.completed }); setActiveTaskForDetails(null); }
-                else { updateTaskInDb(taskId, { subtasks: updatedData.subtasks, note: updatedData.note }); if (activeTaskForDetails && activeTaskForDetails.id === taskId) setActiveTaskForDetails(updatedData); }
-            };
-
-            const initiateToggleDaily = (task) => {
-                const rule = dailyRules.find(r => r.id === task.ruleId);
-                const isRepeating = rule && (rule.endDate === null || rule.endDate > selectedDate);
-                if (isRepeating) {
-                    if(rule) updateRule(rule.id, { endDate: selectedDate });
-                    showToast('Recurring Disabled');
-                } else {
-                    setPendingTaskForFrequency(task);
-                    setShowFrequencyModal(true);
-                }
-            };
-
-            const confirmToggleDaily = (days) => {
-                const task = pendingTaskForFrequency;
-                const rule = dailyRules.find(r => r.id === task.ruleId);
-                if (rule) {
-                    updateRule(rule.id, { endDate: null, days: days });
-                } else {
-                    addRule({ text: task.text, category: task.category, startDate: selectedDate, endDate: null, days: days })
-                        .then(docRef => updateTaskInDb(task.id, { ruleId: docRef.id }));
-                }
-                setShowFrequencyModal(false);
-                setPendingTaskForFrequency(null);
-                showToast('Recurring Enabled');
-            };
-
-            const handleBulkAdd = (tasks) => {
-                tasks.forEach(t => {
-                    setTimeout(() => {
-                        addTaskToDb({ text: t.text, category: t.category, completed: false, date: t.date, subtasks: [], note: "" });
-                    }, 50);
-                });
-                showToast(`${tasks.length} Tasks Added!`);
-            };
-            
-            const getCategoryColor = (cat) => {
-                switch(cat) {
-                    case 'Work': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300';
-                    case 'Health': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300';
-                    case 'Personal': return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300';
-                    default: return 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
-                }
-            };
-
-            return (
-                <div className="space-y-6 animate-slide-in max-w-5xl mx-auto">
-                    <form onSubmit={handleAddTask} className="flex flex-col gap-3">
-                        <input type="text" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a new task..." className="w-full p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 dark:text-white shadow-sm focus:ring-2 focus:ring-primary-500 outline-none" />
-                        <div className="flex gap-2">
-                            <button type="button" onClick={() => setShowBulkAdd(true)} className="p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition"><ListIcon size={24} /></button>
-                            <select value={category} onChange={(e) => setCategory(e.target.value)} className="flex-1 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-800 dark:text-white text-sm focus:outline-none">
-                                <option value="General">General</option><option value="Work">Work</option><option value="Health">Health</option><option value="Personal">Personal</option>
-                            </select>
-                            <button className="bg-primary-600 text-white px-6 rounded-xl font-bold shadow-md hover:bg-primary-700 transition flex items-center gap-2"><Plus size={20} /> Add</button>
+                <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+                    {/* Mobile Header */}
+                    <header className="md:hidden bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-4 sticky top-0 z-30 flex justify-between items-center">
+                        <div className="flex items-center gap-2 text-blue-600 dark:text-blue-500"><Activity size={28} /><h1 className="text-xl font-bold text-slate-900 dark:text-white">LifeTrack</h1></div>
+                        <div className="flex items-center gap-4">
+                            <button onClick={() => setDarkMode(!darkMode)} className="text-slate-500 dark:text-slate-400">{darkMode ? <Sun size={20} /> : <Moon size={20} />}</button>
+                            <button onClick={() => setShowSettings(true)} className="text-slate-500 dark:text-slate-400"><Settings size={20} /></button>
                         </div>
-                    </form>
+                    </header>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        {localTasks.map(task => {
-                            const activeRule = dailyRules.find(r => r.id === task.ruleId);
-                            const isRepeating = activeRule && (activeRule.endDate === null || activeRule.endDate > selectedDate);
-                            const subtaskCount = task.subtasks ? task.subtasks.length : 0;
-                            const completedSubtasks = task.subtasks ? task.subtasks.filter(s => s.completed).length : 0;
-
-                            return (
-                                <div key={task.id} className={`flex items-center justify-between p-4 bg-white dark:bg-dark-800 rounded-xl shadow-sm border-l-4 transition-all hover-card ${task.completed ? 'border-green-500 opacity-60' : 'border-primary-500'}`}>
-                                    <div className="flex items-center gap-3 overflow-hidden flex-1">
-                                        <button onClick={() => handleToggleTask(task)} className={`text-xl ${task.completed ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'}`}>{task.completed ? <CheckCircle size={24} /> : <Circle size={24} />}</button>
-                                        <div className="flex flex-col overflow-hidden">
-                                            <span className={`font-medium truncate ${task.completed ? 'line-through text-gray-400' : 'text-gray-800 dark:text-white'}`}>{task.text}{isRepeating && <Repeat size={12} className="inline ml-1 text-primary-400" />}</span>
-                                            <div className="flex items-center gap-2 mt-1">
-                                                <span className={`text-[10px] px-2 py-0.5 rounded-full w-fit ${getCategoryColor(task.category)}`}>{task.category}</span>
-                                                {subtaskCount > 0 && (<span className="text-[10px] px-2 py-0.5 rounded-full w-fit bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 flex items-center gap-1"><FileText size={10} /> {completedSubtasks}/{subtaskCount}</span>)}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-3 ml-2">
-                                        <button onClick={() => setActiveTaskForDetails(task)} className="p-1.5 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-300"><FileText size={18} /></button>
-                                        <button onClick={() => initiateToggleDaily(task)} className={`w-8 h-5 rounded-full relative transition-colors ${isRepeating ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'}`}><span className={`absolute top-1 left-1 bg-white w-3 h-3 rounded-full transition-transform ${isRepeating ? 'translate-x-3' : ''}`} /></button>
-                                        <button onClick={() => handleDeleteTask(task)} className="text-gray-300 hover:text-red-500"><Trash2 size={18} /></button>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                    {/* Desktop Header Title */}
+                    <div className="hidden md:flex justify-between items-center p-6 pb-0 max-w-5xl mx-auto w-full">
+                        <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
+                            {activeTab === 'dashboard' ? 'Overview' : activeTab === 'todo' ? 'Tasks' : activeTab === 'gym' ? 'Workout Log' : 'Diet Tracker'}
+                        </h2>
                     </div>
-                    {activeTaskForDetails && <TaskDetailsPage task={activeTaskForDetails} onClose={() => setActiveTaskForDetails(null)} onUpdate={handleUpdateDetails} />}
-                    {showFrequencyModal && <FrequencyModal onClose={() => { setShowFrequencyModal(false); setPendingTaskForFrequency(null); }} onSave={confirmToggleDaily} initialDays={pendingTaskForFrequency?.ruleId ? dailyRules.find(r => r.id === pendingTaskForFrequency.ruleId)?.days : undefined} />}
-                    {showBulkAdd && <BulkAddModal onClose={() => setShowBulkAdd(false)} onAdd={handleBulkAdd} selectedDate={selectedDate} />}
-                </div>
-            );
-        }
 
-        // --- GYM SECTION ---
-        function GymSection({ userId, selectedDate }) {
-            const { data: workouts, add: addWorkout, remove: deleteWorkout } = useFirestore(userId, 'gym');
-            const [entry, setEntry] = useState({ exercise: '', sets: '', reps: '', weight: '' });
-            const { showToast } = useContext(ToastContext);
-
-            const addSet = (e) => {
-                e.preventDefault(); if (!entry.exercise) return;
-                addWorkout({ ...entry, date: selectedDate });
-                setEntry({ ...entry, sets: '', reps: '', weight: '' });
-                showToast('Set Logged');
-            };
-
-            const handleDeleteWorkout = (id) => {
-                 const workoutToRestore = workouts.find(w => w.id === id);
-                 const { id: _, ...data } = workoutToRestore; 
-                 const cleanWorkoutData = cleanData(data);
-                 deleteWorkout(id); 
-                 showToast('Workout Deleted', 'default', { label: 'UNDO', onClick: () => addWorkout(cleanWorkoutData) }); 
-            };
-
-            const todaysWorkouts = workouts.filter(w => w.date === selectedDate);
-            todaysWorkouts.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-
-            return (
-                <div className="space-y-6 animate-slide-in max-w-5xl mx-auto">
-                    <div className="bg-white dark:bg-dark-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
-                        <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-gray-900 dark:text-white"><Dumbbell className="text-primary-600" size={24} /> Log Workout</h2>
-                        <form onSubmit={addSet} className="space-y-4">
-                            <input type="text" placeholder="Exercise Name" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white" value={entry.exercise} onChange={e => setEntry({...entry, exercise: e.target.value})} />
-                            <div className="grid grid-cols-3 gap-3">
-                                <input type="number" placeholder="kg" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={entry.weight} onChange={e => setEntry({...entry, weight: e.target.value})} />
-                                <input type="number" placeholder="Sets" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={entry.sets} onChange={e => setEntry({...entry, sets: e.target.value})} />
-                                <input type="number" placeholder="Reps" className="w-full p-3 rounded-xl border dark:border-gray-600 bg-gray-50 dark:bg-dark-900 dark:text-white text-center" value={entry.reps} onChange={e => setEntry({...entry, reps: e.target.value})} />
-                            </div>
-                            <button className="w-full bg-gray-900 dark:bg-white text-white dark:text-gray-900 py-3 rounded-xl font-bold shadow-md hover:opacity-90">Log Set</button>
-                        </form>
-                    </div>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        {todaysWorkouts.length === 0 && <div className="text-center text-gray-400 py-8 col-span-full">No workouts logged today.</div>}
-                        {todaysWorkouts.map((w) => (
-                            <div key={w.id} className="bg-white dark:bg-dark-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 flex justify-between items-center hover-card">
-                                <div><p className="font-bold text-gray-800 dark:text-white">{w.exercise}</p><p className="text-sm text-gray-500 dark:text-gray-400">{w.weight}kg × {w.sets} sets × {w.reps} reps</p></div>
-                                <button onClick={() => handleDeleteWorkout(w.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={18} /></button>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            );
-        }
-
-        // --- DIET SECTION ---
-        function DietSection({ userId, selectedDate, goals }) {
-            const { data: meals, add: addMealDb, update: updateMealDb, remove: removeMealDb } = useFirestore(userId, 'diet');
-            const { data: water, add: addW, update: updW } = useFirestore(userId, 'water');
-            const [newMeal, setNewMeal] = useState({ name: '', calories: '', protein: '' });
-            const { showToast } = useContext(ToastContext);
-            const handleAdd = (e) => { e.preventDefault(); if(!newMeal.name) return; addMealDb({ ...newMeal, date: selectedDate, completed: false }); setNewMeal({ name: '', calories: '', protein: '' }); showToast("Added"); };
-            const handleDel = (m) => { const bak = { ...m }; removeMealDb(m.id); showToast("Deleted", "default", { label: "Undo", onClick: () => addMealDb(cleanData(bak)) }); };
-            const updateWater = (amt) => { const w = water.find(x => x.date === selectedDate); if(w) updW(w.id, { amount: amt }); else addW({ date: selectedDate, amount: amt }); };
-            const wVal = water.find(x => x.date === selectedDate)?.amount || 0;
-            const todays = meals.filter(m => m.date === selectedDate).sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
-
-            return (
-                <div className="space-y-6 max-w-5xl mx-auto animate-slide-in">
-                    <div className="bg-white dark:bg-dark-800 p-4 rounded-xl shadow-sm border dark:border-gray-700 flex justify-between items-center"><div className="flex gap-3"><button onClick={() => updateWater(wVal+1)} className="bg-cyan-500 text-white w-10 h-10 rounded-full flex items-center justify-center shadow-md"><Plus/></button><button onClick={() => updateWater(wVal-1)} className="bg-gray-100 text-gray-500 w-10 h-10 rounded-full flex items-center justify-center"><Minus/></button></div><WaterProgressCircle value={wVal} max={goals.water} color="#06b6d4" size={70}/></div>
-                    <form onSubmit={handleAdd} className="bg-white dark:bg-dark-800 p-4 rounded-xl border dark:border-gray-700 flex flex-col gap-3"><input placeholder="Meal" className="p-3 border rounded-xl dark:bg-dark-900 dark:text-white" value={newMeal.name} onChange={e => setNewMeal({...newMeal, name: e.target.value})}/><div className="flex gap-2"><input placeholder="Cals" type="number" className="w-full p-3 border rounded-xl dark:bg-dark-900 dark:text-white" value={newMeal.calories} onChange={e => setNewMeal({...newMeal, calories: e.target.value})}/><input placeholder="Prot" type="number" className="w-full p-3 border rounded-xl dark:bg-dark-900 dark:text-white" value={newMeal.protein} onChange={e => setNewMeal({...newMeal, protein: e.target.value})}/><button className="bg-green-600 text-white px-5 rounded-xl font-bold"><Plus/></button></div></form>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">{todays.map(m => (<div key={m.id} className={`flex justify-between p-4 bg-white dark:bg-dark-800 rounded-xl border dark:border-gray-700 shadow-sm ${m.completed ? 'opacity-60' : ''}`}><div className="flex gap-3 items-center"><button onClick={() => updateMealDb(m.id, { completed: !m.completed })} className={m.completed ? 'text-green-500' : 'text-gray-300'}>{m.completed ? <CheckCircle/> : <Circle/>}</button><div><p className={`font-medium dark:text-white ${m.completed ? 'line-through' : ''}`}>{m.name}</p><p className="text-xs text-gray-500">{m.calories} cal • {m.protein}g</p></div></div><button onClick={() => handleDel(m)} className="text-gray-300 hover:text-red-500"><Trash2/></button></div>))}</div>
-                </div>
-            );
-        }
-
-        // --- APP ROOT ---
-        function App() {
-            const [user, setUser] = useState(null);
-            const [currentView, setCurrentView] = useState('landing');
-            const [loading, setLoading] = useState(true);
-            const [activeTab, setActiveTab] = useState('dashboard');
-            const [globalDate, setGlobalDate] = useState(getTodayString());
-            const [darkMode, setDarkMode] = useState(false);
-            const [showSettings, setShowSettings] = useState(false);
-            const [goals, setGoals] = useState({ calories: 2500, protein: 160, water: 4 });
-
-            useEffect(() => { const sub = auth.onAuthStateChanged(u => { setUser(u); setLoading(false); if(u) setCurrentView('app'); }); return sub; }, []);
-            useEffect(() => { if(darkMode) document.documentElement.classList.add('dark'); else document.documentElement.classList.remove('dark'); }, [darkMode]);
-            useEffect(() => { if (user && user.uid !== 'guest') db.collection('users').doc(user.uid).set({ goals }, { merge: true }); else if (user && user.uid === 'guest') localStorage.setItem('lifetrack_goals', JSON.stringify(goals)); }, [goals, user]);
-            useEffect(() => { if(user && user.uid !== 'guest') { db.collection('users').doc(user.uid).get().then(doc => { if(doc.exists && doc.data().goals) setGoals(doc.data().goals); }); } else if (user && user.uid === 'guest') { const saved = localStorage.getItem('lifetrack_goals'); if (saved) setGoals(JSON.parse(saved)); } }, [user]);
-
-            const login = () => { const p = new firebase.auth.GoogleAuthProvider(); auth.signInWithPopup(p).catch(e => alert(e.message)); };
-            const guest = () => { setUser({ uid: 'guest', photoURL: 'https://cdn-icons-png.flaticon.com/512/149/149071.png', displayName: 'Guest' }); setCurrentView('app'); };
-
-            if (loading) return <div className="h-screen flex items-center justify-center dark:bg-dark-900 dark:text-white">Loading...</div>;
-
-            if (!user && currentView === 'landing') return <LandingPage setView={setCurrentView} />;
-            if (!user && (currentView === 'login' || currentView === 'register')) {
-                return (
-                    <div className="fixed inset-0 bg-white flex flex-col items-center justify-center p-6 animate-fade-in">
-                        <div className="w-full max-w-md text-center">
-                            <h2 className="text-3xl font-bold mb-8">Welcome Back</h2>
-                            <button onClick={login} className="w-full p-3 border rounded-xl flex justify-center gap-2 mb-4 hover:bg-gray-50"><GoogleIcon /> Sign in with Google</button>
-                            <button onClick={guest} className="w-full p-3 bg-gray-900 text-white rounded-xl hover:bg-gray-800 flex justify-center gap-2"><GuestIcon /> Guest Mode</button>
-                            <button onClick={() => setCurrentView('landing')} className="mt-8 text-gray-400 text-sm">Back to Home</button>
-                        </div>
-                    </div>
-                );
-            }
-
-            return (
-                <ToastProvider>
-                    <div className="flex h-screen bg-gray-50 dark:bg-dark-900 text-gray-900 dark:text-gray-100 overflow-hidden">
-                        <aside className="hidden md:flex w-64 flex-col bg-white dark:bg-dark-800 border-r border-gray-200 dark:border-gray-700">
-                            <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} user={user} setDarkMode={setDarkMode} darkMode={darkMode} setShowSettings={setShowSettings} />
-                        </aside>
-                        <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-                            <header className="md:hidden bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-gray-700 p-4 sticky top-0 z-20">
-                                <div className="flex justify-between items-center"><div className="flex items-center gap-2 text-primary-600"><Activity size={28}/><h1 className="text-xl font-bold dark:text-white">LifeTrack</h1></div><div className="flex items-center gap-4"><button onClick={()=>setDarkMode(!darkMode)}>{darkMode?<Sun/>:<Moon/>}</button><button onClick={()=>setShowSettings(true)}><Settings/></button><img src={user.photoURL} className="w-8 h-8 rounded-full"/></div></div>
-                            </header>
+                    <div className="flex-1 overflow-y-auto p-4 md:p-6">
+                        <main className="max-w-5xl mx-auto pb-24 md:pb-0">
                             <DateNavigator selectedDate={globalDate} setSelectedDate={setGlobalDate} />
-                            <main className="max-w-md mx-auto p-4 w-full flex-1 scroll-container">
-                                {activeTab === 'dashboard' && <DashboardSection userId={user.uid} selectedDate={globalDate} goals={goals} />}
-                                {activeTab === 'todo' && <TodoSection userId={user.uid} selectedDate={globalDate} />}
-                                {activeTab === 'gym' && <GymSection userId={user.uid} selectedDate={globalDate} />}
-                                {activeTab === 'diet' && <DietSection userId={user.uid} selectedDate={globalDate} goals={goals} />}
-                            </main>
-                            <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-dark-800 border-t border-gray-200 dark:border-gray-700 px-6 py-3 flex justify-between items-center z-20 pb-safe">
-                                <NavButton active={activeTab==='dashboard'} onClick={()=>setActiveTab('dashboard')} icon={<Home/>} label="Home"/>
-                                <NavButton active={activeTab==='todo'} onClick={()=>setActiveTab('todo')} icon={<CheckSquare/>} label="Tasks"/>
-                                <NavButton active={activeTab==='gym'} onClick={()=>setActiveTab('gym')} icon={<Dumbbell/>} label="Gym"/>
-                                <NavButton active={activeTab==='diet'} onClick={()=>setActiveTab('diet')} icon={<Utensils/>} label="Diet"/>
-                            </nav>
-                        </div>
-                        {showSettings && (
-                            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                                <div className="bg-white dark:bg-dark-800 w-full max-w-sm rounded-2xl shadow-2xl p-6 animate-slide-up">
-                                    <div className="flex justify-between items-center mb-6"><h3 className="text-lg font-bold dark:text-white">Adjust Goals</h3><button onClick={() => setShowSettings(false)}><X size={24} className="text-gray-400"/></button></div>
-                                    <div className="space-y-4">
-                                        <div><label className="text-xs font-bold text-gray-500 mb-1 block">Calories</label><input type="number" value={goals.calories} onChange={e => setGoals({...goals, calories: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:bg-dark-900 dark:text-white"/></div>
-                                        <div><label className="text-xs font-bold text-gray-500 mb-1 block">Protein</label><input type="number" value={goals.protein} onChange={e => setGoals({...goals, protein: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:bg-dark-900 dark:text-white"/></div>
-                                        <div><label className="text-xs font-bold text-gray-500 mb-1 block">Water</label><input type="number" value={goals.water} onChange={e => setGoals({...goals, water: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:bg-dark-900 dark:text-white"/></div>
-                                        <button onClick={() => { auth.signOut(); setUser(null); setShowSettings(false); }} className="w-full py-3 text-red-500 border border-red-100 rounded-lg">Sign Out</button>
-                                        <button onClick={() => setShowSettings(false)} className="w-full py-3 bg-primary-600 text-white rounded-lg font-bold">Save Goals</button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
+                            
+                            {activeTab === 'dashboard' && <DashboardSection userId={user.uid} selectedDate={globalDate} goals={goals} />}
+                            {activeTab === 'todo' && <TodoSection userId={user.uid} selectedDate={globalDate} />}
+                            {activeTab === 'gym' && <GymSection userId={user.uid} selectedDate={globalDate} />}
+                            {activeTab === 'diet' && <DietSection userId={user.uid} selectedDate={globalDate} goals={goals} />}
+                        </main>
                     </div>
-                </ToastProvider>
-            );
-        }
 
-        // --- APP ROOT ---
-        function Root() {
-            return (
-                <App />
-            );
-        }
+                    {/* Mobile Bottom Nav */}
+                    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 px-6 py-3 flex justify-between items-center z-40">
+                        {[{id: 'dashboard', icon: Home, l: 'Home'}, {id: 'todo', icon: CheckSquare, l: 'Tasks'}, {id: 'gym', icon: Dumbbell, l: 'Gym'}, {id: 'diet', icon: Utensils, l: 'Diet'}].map(t => (
+                            <button key={t.id} onClick={() => setActiveTab(t.id)} className={`flex flex-col items-center gap-1 ${activeTab === t.id ? 'text-blue-600' : 'text-slate-400'}`}>
+                                <t.icon size={24} />
+                                <span className="text-[10px] font-medium">{t.l}</span>
+                            </button>
+                        ))}
+                    </nav>
+                </div>
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<Root />);
-    </script>
-</body>
-</html>
+                {/* Settings Modal */}
+                {showSettings && (
+                    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+                        <div className="bg-white dark:bg-slate-800 w-full max-w-sm rounded-2xl shadow-2xl p-6">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Adjust Goals</h3>
+                                <button onClick={() => setShowSettings(false)}><X size={24} className="text-slate-400" /></button>
+                            </div>
+                            <div className="space-y-4">
+                                <div><label className="text-xs font-bold uppercase text-slate-500 mb-1 block">Daily Calories</label><input type="number" value={goals.calories} onChange={e => setGoals({...goals, calories: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:border-slate-600 bg-slate-50 dark:bg-slate-900 dark:text-white" /></div>
+                                <div><label className="text-xs font-bold uppercase text-slate-500 mb-1 block">Daily Protein</label><input type="number" value={goals.protein} onChange={e => setGoals({...goals, protein: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:border-slate-600 bg-slate-50 dark:bg-slate-900 dark:text-white" /></div>
+                                <div><label className="text-xs font-bold uppercase text-slate-500 mb-1 block">Daily Water</label><input type="number" value={goals.water} onChange={e => setGoals({...goals, water: Number(e.target.value)})} className="w-full p-3 rounded-lg border dark:border-slate-600 bg-slate-50 dark:bg-slate-900 dark:text-white" /></div>
+                                <button onClick={handleLogout} className="w-full py-3 text-red-500 font-medium text-sm mt-4 border border-red-100 dark:border-red-900 rounded-lg hover:bg-red-50">Sign Out</button>
+                                <button onClick={() => saveGoals(goals)} className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold shadow-lg hover:bg-blue-700">Save Goals</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </ToastProvider>
+    );
+}
